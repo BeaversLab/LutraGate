@@ -1,0 +1,17 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "lutragate",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "lutragate",
+      // Deploy-time: replace with your own D1 database_id (export snapshot uses "local").
+      "database_id": "local",
+      "migrations_dir": "migrations"
+    }
+  ]
+  // ENCRYPTION_KEY (secret) is injected at deploy time; /v1 auth uses lgk_
+  // access keys stored in D1 (multi-user), not an env token.
+}

@@ -1,0 +1,22 @@
+# LutraGate Server 形态一键启动（ticket 12）：
+#   cp .env.example .env && 编辑后执行 docker compose up -d --build
+services:
+  lutragate:
+    build:
+      context: .
+      dockerfile: packages/server/Dockerfile
+    image: lutragate:latest
+    restart: unless-stopped
+    ports:
+      # 默认只绑定本机回环，避免把管理面暴露到局域网/公网；
+      # 需要局域网访问时改为 "8787:8787" 或加 ALLOWED_IPS 白名单。
+      - "127.0.0.1:8787:8787"
+    env_file: .env
+    environment:
+      # 数据库放命名卷里，容器重建不丢配置。
+      DB_PATH: /data/lutragate.db
+    volumes:
+      - lutragate-data:/data
+
+volumes:
+  lutragate-data:

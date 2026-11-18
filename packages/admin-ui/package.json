@@ -1,0 +1,38 @@
+{
+  "name": "@lutragate/admin-ui",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "LutraGate 本地管理端（Vite + React）",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -p tsconfig.app.json --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc -p tsconfig.app.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@lutragate/core": "workspace:^",
+    "@lutragate/shared": "workspace:*",
+    "@tauri-apps/plugin-sql": "^2",
+    "d3-scale": "^4.0.3",
+    "dexie": "^4.4.7",
+    "i18next": "^27.1.1",
+    "lucide-react": "^1.70.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "react-i18next": "^18.0.1"
+  },
+  "devDependencies": {
+    "@testing-library/react": "^16.3.0",
+    "@types/d3-scale": "^4.0.9",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "@vitejs/plugin-react": "^4.5.0",
+    "fake-indexeddb": "^6.2.7",
+    "jsdom": "^26.1.0",
+    "typescript": "^5.9.3",
+    "vite": "^6.3.0",
+    "vitest": "^3.2.4"
+  }
+}

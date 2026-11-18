@@ -1,0 +1,7 @@
+# Copy to .dev.vars and fill in real values before `wrangler dev`.
+ADMIN_TOKEN="change-me-admin-token"  # 仅引导：创建第一个 administrator 后失效并可删除
+# base64 of 32 random bytes, e.g.: openssl rand -base64 32
+ENCRYPTION_KEY="AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+
+# /v1/* auth uses lgk_ access keys created via /admin and stored in D1 —
+# there is no gateway-token env var anymore (multi-user).
