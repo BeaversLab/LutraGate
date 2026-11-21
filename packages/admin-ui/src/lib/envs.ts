@@ -74,9 +74,12 @@ export function saveEnvState(storage: StorageLike, state: EnvStoreState): void {
   storage.setItem(STATE_KEY, JSON.stringify(state));
 }
 
-/** 活跃环境记录；无环境或活跃 id 失效时为 null。 */
-export function activeEnvOf(state: EnvStoreState): EnvRecord | null {
-  return state.environments.find((e) => e.id === state.activeEnvId) ?? null;
+/** 内置 Web 只读取当前网关的环境记录，兼容此前保存的同源连接。 */
+export function activeEnvOf(state: EnvStoreState, fixedGatewayUrl?: string): EnvRecord | null {
+  const active = state.environments.find((e) => e.id === state.activeEnvId) ?? null;
+  if (fixedGatewayUrl === undefined) return active;
+  const matches = (env: EnvRecord) => normalizeBaseUrl(env.gatewayUrl) === fixedGatewayUrl;
+  return active && matches(active) ? active : state.environments.find(matches) ?? null;
 }
 
 /** 新建/更新环境（按 id 后者胜，更新保序）；列表从零起步时新环境自动成为活跃（首启引导）。 */
@@ -227,4 +230,10 @@ export async function deleteEnvTokenEverywhere(
 /** 规范化网关地址：去首尾空白与尾部斜杠。 */
 export function normalizeBaseUrl(url: string): string {
   return url.trim().replace(/\/+$/, "");
+}
+
+/** 同源预填（builtin-web 03）：内置 Web 端（server/worker 同源端出）的网关地址
+ * 默认取当前 origin——用户少填一次；桌面（tauri:/自定义协议）与 file: 形态回退空串。 */
+export function defaultGatewayUrl(loc: Location = window.location): string {
+  return loc.protocol === "http:" || loc.protocol === "https:" ? loc.origin : "";
 }

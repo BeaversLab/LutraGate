@@ -1,3 +1,4 @@
+import type { Protocol } from "@lutragate/shared";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { formatLatency } from "../lib/connectivity";
@@ -5,7 +6,7 @@ import { formatLatency } from "../lib/connectivity";
 /** 按端点逐个测试并展示结果（每个配置的端点一行）。 */
 
 export interface EndpointSpec {
-  protocol: "openai" | "anthropic";
+  protocol: Protocol;
   baseUrl: string;
 }
 
@@ -19,6 +20,8 @@ export interface EndpointOutcome {
 const PROTOCOL_LABEL: Record<EndpointSpec["protocol"], string> = {
   openai: "OpenAI",
   anthropic: "Anthropic",
+  gemini: "Gemini",
+  responses: "Responses",
 };
 
 export function EndpointTestRunner({

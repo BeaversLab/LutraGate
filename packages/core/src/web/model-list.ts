@@ -85,16 +85,14 @@ export function isNonChatModelEntry(entry: ModelEntry): boolean {
 }
 
 export async function fetchUpstreamModels(
-  input: { baseUrl: string; apiKey: string; protocol: Protocol },
+  input: { baseUrl: string; apiKey: string; protocol: Protocol; query?: Readonly<Record<string, string>> },
   fetcher: Fetcher = { fetch: (req) => fetch(req) },
 ): Promise<ModelListResult> {
   const base = input.baseUrl.trim().replace(/\/+$/, "");
-  // anthropic/gemini/responses 的列表路径固定拼版本段；openai 走版本段规则
-  // （版本化 base 直接 /models，标准 base /v1/models）。
+  // OpenAI Chat 与 Responses 共用版本化的模型列表路径。
   const url =
     input.protocol === "anthropic" ? `${base}/v1/models`
     : input.protocol === "gemini" ? `${base}/v1beta/models`
-    : input.protocol === "responses" ? `${base}/v1/models`
     : modelsListUrl(input.baseUrl);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), LIST_TIMEOUT_MS);
@@ -108,7 +106,9 @@ export async function fetchUpstreamModels(
     } else {
       headers.authorization = `Bearer ${input.apiKey}`;
     }
-    const resp = await fetcher.fetch(new Request(url, { method: "GET", signal: controller.signal, headers }));
+    const target = new URL(url);
+    for (const [name, value] of Object.entries(input.query ?? {})) target.searchParams.set(name, value);
+    const resp = await fetcher.fetch(new Request(target, { method: "GET", signal: controller.signal, headers }));
     if (!resp.ok) {
       let detail = "";
       try {

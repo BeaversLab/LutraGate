@@ -1,3 +1,4 @@
+import type { Protocol } from "@lutragate/shared";
 /**
  * 管理 API 客户端（PRD §8）：统一携带 X-Admin-Token，解析统一错误结构
  * { error: { code, message } }。fetch 可注入便于测试。
@@ -271,7 +272,7 @@ export class AdminApi {
     return this.request(`/admin/keys/${id}/usage${opts.refresh ? "?refresh=1" : ""}`);
   }
   /** 连通性测试服务端转发（03）：手输 Key 服务端直连上游，明文不落库不回显。 */
-  testProvider(id: string, body: { api_key: string; model?: string; protocol: "openai" | "anthropic" }): Promise<KeyTestOutcome & { provider_id: string; protocol: string; model: string }> {
+  testProvider(id: string, body: { api_key: string; model?: string; protocol: Protocol }): Promise<KeyTestOutcome & { provider_id: string; protocol: string; model: string }> {
     return this.request(`/admin/providers/${id}/test`, { method: "POST", body: JSON.stringify(body) });
   }
 

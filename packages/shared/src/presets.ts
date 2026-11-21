@@ -1,13 +1,8 @@
 /**
  * 预置供应商目录（ticket 12 后续增强，参考 new-api 渠道类型预置表）。
  *
- * 收录标准与 spec D7 一致：官方提供 OpenAI Chat Completions 兼容端点
- * 的供应商。路径拼接见 url.ts 的 chatCompletionsUrl：标准端点配
- * {base}（拼 /v1/chat/completions），版本化端点配到版本段为止——智谱
- * GLM（/api/paas/v4）、火山方舟（/api/v3）按此收录。MiniMax 使用
- * chatcompletion_v2 命名（非 chat/completions 路径），待协议适配后
- * 再加入。管理端新增供应商时按类型选择，base_url 自动填充（仍可手
- * 改）；suggested_models 用于连通性测试与映射建议，非强制清单。
+ * 官方文档确认的 API 端点可先开放给用户联调。普通 API 与套餐、
+ * 国内与国际站分预设保存，联调通过后独立标记 verified。
  */
 
 export interface PresetProvider {
@@ -17,7 +12,7 @@ export interface PresetProvider {
   label: string;
   /** 所属公司（同一公司多条 preset 在管理端树形分组用）；缺省 = 单独一家。 */
   vendor?: string;
-  /** OpenAI 格式默认端点（不含 /v1 路径，网关转发时拼接）。 */
+  /** OpenAI 格式默认 Base URL。既可包含官方版本段，也可使用标准根路径。 */
   base_url: string;
   /** Anthropic 格式默认端点（/v1/messages 直达；缺省表示该供应商不提供）。 */
   anthropic_base_url?: string;
@@ -29,10 +24,15 @@ export interface PresetProvider {
   suggested_models: string[];
   /**
    * 已验证（逐步放开制）：模型发现 / 连通性测试对该供应商真机实测通过。
-   * 未验证的 preset 不出现在「新增供应商」类型下拉（编辑已有供应商不受限，
-   * core 类型校验也仍认全量 id），真机验证一轮放开一条。
+   * 未完成真机验证的条目若有官方文档，则在新增时标为待实测。
    */
   verified?: boolean;
+  /** 官方调用规范，同时用于将已核对的预设开放给用户联调。 */
+  documentation_url?: string;
+  /** 官方文档覆盖的模型发现协议。空数组表示使用静态模型建议。 */
+  model_list_protocols?: readonly ("openai" | "anthropic" | "gemini" | "responses")[];
+  /** 官方模型列表接口支持的筛选参数。 */
+  model_list_query?: Readonly<Record<string, string>>;
   /** 本地自建部署（提示语不同）。 */
   self_hosted?: boolean;
   /**
@@ -58,62 +58,95 @@ export const PRESET_PROVIDERS: PresetProvider[] = [
     label: "OpenAI",
     base_url: "https://api.openai.com",
     responses_base_url: "https://api.openai.com",
-    suggested_models: ["gpt-4o", "gpt-4o-mini", "o4-mini"],
+    documentation_url: "https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create",
+    model_list_protocols: ["openai"],
+    suggested_models: ["gpt-6-luna", "gpt-6.2-sol"],
   },
   {
     id: "google",
     label: "Google Gemini",
     base_url: "https://generativelanguage.googleapis.com/v1beta/openai",
     gemini_base_url: "https://generativelanguage.googleapis.com",
-    suggested_models: ["gemini-2.5-flash", "gemini-2.5-pro"],
+    documentation_url: "https://aistudio.google.com/docs/openai",
+    model_list_protocols: ["openai", "gemini"],
+    suggested_models: ["gemini-4-hydrogen", "gemini-4-argon"],
   },
   {
     id: "anthropic",
     label: "Anthropic（Claude）",
     base_url: "https://api.anthropic.com",
     anthropic_base_url: "https://api.anthropic.com",
-    suggested_models: ["claude-sonnet-4-5", "claude-haiku-4-5"],
+    documentation_url: "https://platform.claude.com/docs/en/cli-sdks-libraries/libraries/openai-sdk",
+    model_list_protocols: ["anthropic"],
+    suggested_models: ["claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5"],
   },
   {
     id: "deepseek",
     label: "DeepSeek（深度求索）",
     base_url: "https://api.deepseek.com",
     anthropic_base_url: "https://api.deepseek.com/anthropic",
-    suggested_models: ["deepseek-chat", "deepseek-reasoner"],
+    suggested_models: ["deepseek-flash", "deepseek-v4-pro"],
   },
   {
     id: "moonshot",
     label: "Moonshot（月之暗面 Kimi）",
+    vendor: "月之暗面",
     base_url: "https://api.moonshot.cn",
     anthropic_base_url: "https://api.moonshot.cn/anthropic",
-    suggested_models: ["kimi-k2-0905-preview", "moonshot-v1-128k"],
+    suggested_models: ["kimi-k3.1-pro", "kimi-k3.1-pro-highspeed"],
+  },
+  {
+    id: "moonshot-global",
+    label: "Kimi 开放平台（国际）",
+    vendor: "月之暗面",
+    base_url: "https://api.moonshot.ai/v1",
+    responses_base_url: "https://api.moonshot.ai/v1",
+    documentation_url: "https://platform.kimi.ai/docs/api/overview",
+    model_list_protocols: ["openai"],
+    suggested_models: ["kimi-k3.1-pro", "kimi-k3.1-pro-highspeed"],
   },
   {
     id: "groq",
     label: "Groq",
     base_url: "https://api.groq.com/openai",
-    suggested_models: ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"],
+    documentation_url: "https://console.groq.com/docs/openai",
+    model_list_protocols: ["openai"],
+    suggested_models: ["openai/gpt-oss-20b", "openai/gpt-oss-120b", "qwen/qwen3.8-27b"],
   },
   {
     id: "openrouter",
     label: "OpenRouter",
     base_url: "https://openrouter.ai/api",
-    suggested_models: ["openai/gpt-4o-mini", "anthropic/claude-3.5-sonnet"],
+    documentation_url: "https://openrouter.ai/docs/api/api-reference/chat/create-a-chat-completion",
+    model_list_protocols: ["openai"],
+    suggested_models: ["deepseek/deepseek-v4.1-flash-1017", "anthropic/claude-sonnet-5.5"],
   },
   {
     id: "siliconflow",
     label: "硅基流动 SiliconFlow",
+    vendor: "硅基流动",
     base_url: "https://api.siliconflow.cn",
-    suggested_models: ["deepseek-ai/DeepSeek-V3", "Qwen/Qwen2.5-72B-Instruct"],
+    suggested_models: ["deepseek-ai/DeepSeek-V4.1-Flash", "Qwen/Qwen3.8-27B"],
+  },
+  {
+    id: "siliconflow-global",
+    label: "SiliconFlow（国际）",
+    vendor: "硅基流动",
+    base_url: "https://api.siliconflow.com/v1",
+    documentation_url: "https://docs.siliconflow.com/en/userguide/quickstart",
+    model_list_protocols: ["openai"],
+    model_list_query: { sub_type: "chat" },
+    suggested_models: ["deepseek-ai/DeepSeek-V4-Pro-0813"],
   },
   {
     id: "zhipu",
     label: "智谱 GLM",
     vendor: "智谱",
     verified: true,
+    documentation_url: "https://docs.bigmodel.cn/cn/guide/start/quick-start",
     base_url: "https://open.bigmodel.cn/api/paas/v4",
     anthropic_base_url: "https://open.bigmodel.cn/api/anthropic",
-    suggested_models: ["glm-4.5", "glm-4-flash"],
+    suggested_models: ["glm-5.3-flash", "glm-5.3"],
   },
   {
     // Coding Plan 专属网关（与通用 API 的 key/额度独立，不互通）：
@@ -123,18 +156,29 @@ export const PRESET_PROVIDERS: PresetProvider[] = [
     label: "智谱 GLM Coding Plan",
     vendor: "智谱",
     verified: true,
+    documentation_url: "https://docs.bigmodel.cn/cn/coding-plan/quick-start",
     base_url: "https://open.bigmodel.cn/api/coding/paas/v4",
     anthropic_base_url: "https://open.bigmodel.cn/api/anthropic",
     responses_base_url: "https://open.bigmodel.cn/api",
-    suggested_models: ["glm-4.7", "glm-4.6", "glm-4.5"],
+    suggested_models: ["glm-5.3", "glm-5.3-flash"],
+  },
+  {
+    id: "zai",
+    label: "Z.ai GLM（国际）",
+    vendor: "智谱",
+    base_url: "https://api.z.ai/api/paas/v4",
+    documentation_url: "https://docs.z.ai/guides/overview/quick-start",
+    model_list_protocols: [],
+    suggested_models: ["glm-5.3", "glm-5.3-flash"],
   },
   {
     id: "volcengine",
     label: "火山方舟（豆包）",
     vendor: "火山引擎",
     verified: true,
+    documentation_url: "https://docs.volcengine.com/docs/ark/chat-api?lang=zh",
     base_url: "https://ark.cn-beijing.volces.com/api/v3",
-    suggested_models: ["doubao-pro-32k", "doubao-1.5-pro-32k"],
+    suggested_models: ["doubao-seed-2-1-lite-260915", "doubao-seed-2-1-pro-260915"],
   },
   {
     // 编程套餐独立网关（AgentPlan / Coding Plan 共用 /api/plan 入口，与按量
@@ -145,6 +189,7 @@ export const PRESET_PROVIDERS: PresetProvider[] = [
     label: "火山方舟 AgentPlan（编程套餐）",
     vendor: "火山引擎",
     verified: true,
+    documentation_url: "https://console.volcengine.com/ark/region:cn-beijing/docs/agent-plan-personal-get-started",
     base_url: "https://ark.cn-beijing.volces.com/api/plan/v3",
     anthropic_base_url: "https://ark.cn-beijing.volces.com/api/plan",
     // 套餐实际可用清单（真机拉取回报；按输出顺序）。doubao/GLM/Kimi/DeepSeek 以
@@ -165,16 +210,118 @@ export const PRESET_PROVIDERS: PresetProvider[] = [
     ],
   },
   {
+    id: "dashscope-cn",
+    label: "阿里云百炼（北京）",
+    vendor: "阿里云百炼",
+    base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    anthropic_base_url: "https://dashscope.aliyuncs.com/apps/anthropic",
+    documentation_url: "https://help.aliyun.com/en/model-studio/base-url",
+    model_list_protocols: [],
+    suggested_models: ["qwen3.8-flash", "qwen3.8-max"],
+  },
+  {
+    id: "dashscope-sg",
+    label: "阿里云百炼（新加坡）",
+    vendor: "阿里云百炼",
+    base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+    anthropic_base_url: "https://dashscope-intl.aliyuncs.com/apps/anthropic",
+    documentation_url: "https://help.aliyun.com/en/model-studio/base-url",
+    model_list_protocols: [],
+    suggested_models: ["qwen3.8-flash", "qwen3.8-max"],
+  },
+  {
+    id: "dashscope-us",
+    label: "阿里云百炼（弗吉尼亚）",
+    vendor: "阿里云百炼",
+    base_url: "https://dashscope-us.aliyuncs.com/compatible-mode/v1",
+    anthropic_base_url: "https://dashscope-us.aliyuncs.com/apps/anthropic",
+    documentation_url: "https://help.aliyun.com/en/model-studio/base-url",
+    model_list_protocols: [],
+    suggested_models: ["qwen3.8-flash", "qwen3.8-max"],
+  },
+  {
+    id: "tokenhub-cn",
+    label: "腾讯云 TokenHub（广州）",
+    vendor: "腾讯云",
+    base_url: "https://tokenhub.tencentmaas.com/v1",
+    anthropic_base_url: "https://tokenhub.tencentmaas.com",
+    responses_base_url: "https://tokenhub.tencentmaas.com/v1",
+    documentation_url: "https://cloud.tencent.com/document/product/1823/130079",
+    model_list_protocols: ["openai"],
+    suggested_models: ["hy4", "deepseek-v4.1-flash"],
+  },
+  {
+    id: "tokenhub-sg",
+    label: "腾讯云 TokenHub（新加坡）",
+    vendor: "腾讯云",
+    base_url: "https://tokenhub-intl.tencentmaas.com/v1",
+    anthropic_base_url: "https://tokenhub-intl.tencentmaas.com",
+    responses_base_url: "https://tokenhub-intl.tencentmaas.com/v1",
+    documentation_url: "https://cloud.tencent.com/document/product/1823/130079",
+    model_list_protocols: ["openai"],
+    suggested_models: ["hy4", "deepseek-v4.1-flash"],
+  },
+  {
+    id: "minimax-cn",
+    label: "MiniMax（国内）",
+    vendor: "MiniMax",
+    base_url: "https://api.minimax.cn/v1",
+    documentation_url: "https://platform.minimax.cn/docs/api-reference/text-openai-api",
+    model_list_protocols: [],
+    suggested_models: ["MiniMax-M3", "MiniMax-M3.1-Flash"],
+  },
+  {
+    id: "minimax-global",
+    label: "MiniMax（国际）",
+    vendor: "MiniMax",
+    base_url: "https://api.minimax.io/v1",
+    documentation_url: "https://platform.minimax.io/docs/api-reference/text-openai-api",
+    model_list_protocols: [],
+    suggested_models: ["MiniMax-M3", "MiniMax-M3.1-Flash"],
+  },
+  {
+    id: "qianfan",
+    label: "百度智能云千帆",
+    base_url: "https://qianfan.baidubce.com/v2",
+    responses_base_url: "https://qianfan.baidubce.com/v2",
+    documentation_url: "https://cloud.baidu.com/doc/qianfan-api/s/wmwbl48n4",
+    model_list_protocols: ["openai"],
+    suggested_models: ["qwen3-14b"],
+  },
+  {
+    id: "together",
+    label: "Together AI",
+    base_url: "https://api.together.ai/v1",
+    responses_base_url: "https://api.together.ai/v1",
+    documentation_url: "https://docs.together.ai/docs/inference/openai-compatibility",
+    model_list_protocols: ["openai"],
+    suggested_models: ["MiniMaxAI/MiniMax-M3.1-Flash"],
+  },
+  {
+    id: "fireworks",
+    label: "Fireworks AI",
+    base_url: "https://api.fireworks.ai/inference/v1",
+    anthropic_base_url: "https://api.fireworks.ai/inference",
+    documentation_url: "https://docs.fireworks.ai/getting-started/quickstart",
+    model_list_protocols: [],
+    suggested_models: ["accounts/fireworks/models/glm-5p3-flash"],
+  },
+  {
     id: "xai",
     label: "xAI（Grok）",
     base_url: "https://api.x.ai",
-    suggested_models: ["grok-3", "grok-3-mini"],
+    responses_base_url: "https://api.x.ai",
+    documentation_url: "https://docs.x.ai/developers/model-capabilities/text/comparison",
+    model_list_protocols: ["openai"],
+    suggested_models: ["grok-4.3", "grok-4.7"],
   },
   {
     id: "mistral",
     label: "Mistral",
     base_url: "https://api.mistral.ai",
-    suggested_models: ["mistral-large-latest", "ministral-8b-latest"],
+    documentation_url: "https://docs.mistral.ai/api/endpoint/chat",
+    model_list_protocols: ["openai"],
+    suggested_models: ["mistral-large-4-0", "ministral-8b-2512"],
   },
   {
     id: "perplexity",
@@ -186,7 +333,7 @@ export const PRESET_PROVIDERS: PresetProvider[] = [
     id: "ollama",
     label: "Ollama（本地）",
     base_url: "http://host.docker.internal:11434",
-    suggested_models: ["qwen2.5:7b", "llama3.1:8b"],
+    suggested_models: ["qwen3.5:4b", "qwen3.5:9b", "gemma4:e4b"],
     self_hosted: true,
   },
   {
@@ -207,17 +354,17 @@ export function findPresetProvider(id: string): PresetProvider | undefined {
   return PRESET_PROVIDERS.find((p) => p.id === id);
 }
 
-/** 新增供应商类型下拉可选集：已验证 preset（自定义选项由 UI 自行固定在最前）。 */
-const VERIFIED_PRESET_PROVIDERS: readonly PresetProvider[] =
-  PRESET_PROVIDERS.filter((p) => p.verified);
+/** 已实测以及可以根据官方调用规范开始联调的预设。 */
+const AVAILABLE_PRESET_PROVIDERS: readonly PresetProvider[] =
+  PRESET_PROVIDERS.filter((p) => p.verified || p.documentation_url);
 
 /**
- * 类型下拉可选集（编辑态豁免）：新增只看已验证；编辑额外放行当前供应商
- * 已有的类型——存量行无论是否验证都可继续编辑，但不引入新的未验证类型。
+ * 编辑时额外列出当前供应商
+ * 已有类型，使存量供应商继续可编辑。
  */
 export function selectablePresets(currentType?: string): readonly PresetProvider[] {
-  if (!currentType) return VERIFIED_PRESET_PROVIDERS;
+  if (!currentType) return AVAILABLE_PRESET_PROVIDERS;
   const current = findPresetProvider(currentType);
-  if (!current || current.verified) return VERIFIED_PRESET_PROVIDERS;
-  return [...VERIFIED_PRESET_PROVIDERS, current];
+  if (!current || AVAILABLE_PRESET_PROVIDERS.includes(current)) return AVAILABLE_PRESET_PROVIDERS;
+  return PRESET_PROVIDERS.filter((preset) => preset === current || AVAILABLE_PRESET_PROVIDERS.includes(preset));
 }

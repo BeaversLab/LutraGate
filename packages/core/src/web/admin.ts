@@ -1243,7 +1243,12 @@ async function testKeyById(request: Request, deps: AdminDeps, keyId: string): Pr
   try {
     const body = (await request.json()) as { model?: unknown; protocol?: unknown };
     if (typeof body?.model === "string" && body.model.length > 0) model = body.model;
-    if (body?.protocol === "openai" || body?.protocol === "anthropic") protocol = body.protocol;
+    if (body?.protocol !== undefined) {
+      if (!PROTOCOLS.some((value) => value === body.protocol)) {
+        return jsonError(400, "BAD_REQUEST", `pass a supported protocol: ${PROTOCOLS.join(", ")}`);
+      }
+      protocol = body.protocol as Protocol;
+    }
   } catch {
     // body 可省略
   }
@@ -1252,11 +1257,10 @@ async function testKeyById(request: Request, deps: AdminDeps, keyId: string): Pr
     "SELECT protocol, base_url FROM provider_endpoint WHERE provider_id = ?",
     [row.provider_id as string],
   );
-  const chosen =
-    (protocol !== undefined ? endpoints.find((e) => e.protocol === protocol) : undefined)
-    ?? endpoints[0];
+  const chosen = protocol === undefined ? endpoints[0] : endpoints.find((e) => e.protocol === protocol);
   if (!chosen) {
-    return jsonError(400, "BAD_REQUEST", "this provider has no endpoints configured");
+    const detail = protocol === undefined ? "no endpoints" : `no ${protocol} endpoint`;
+    return jsonError(400, "BAD_REQUEST", `this provider has ${detail} configured`);
   }
   if (!model) {
     const mapping = await deps.db.all<{ upstream_model: string }>(
@@ -1310,7 +1314,7 @@ async function testProviderById(request: Request, deps: AdminDeps, providerId: s
     const body = (await request.json()) as { api_key?: unknown; model?: unknown; protocol?: unknown };
     if (typeof body?.api_key === "string" && body.api_key.length >= 4) apiKey = body.api_key;
     if (typeof body?.model === "string" && body.model.length > 0) model = body.model;
-    if (body?.protocol === "openai" || body?.protocol === "anthropic") protocol = body.protocol;
+    if (PROTOCOLS.some((value) => value === body?.protocol)) protocol = body.protocol as Protocol;
   } catch {
     // body 必填（api_key/protocol），缺失走下方 400。
   }
@@ -1318,7 +1322,7 @@ async function testProviderById(request: Request, deps: AdminDeps, providerId: s
     return jsonError(400, "BAD_REQUEST", "pass { \"api_key\" } (min 4 chars) to test");
   }
   if (protocol === undefined) {
-    return jsonError(400, "BAD_REQUEST", "pass { \"protocol\" } = \"openai\" | \"anthropic\"");
+    return jsonError(400, "BAD_REQUEST", `pass a supported protocol: ${PROTOCOLS.join(", ")}`);
   }
   const endpoints = await deps.db.all<{ protocol: string; base_url: string }>(
     "SELECT protocol, base_url FROM provider_endpoint WHERE provider_id = ?",
@@ -1356,7 +1360,7 @@ async function listProviderModels(deps: AdminDeps, providerId: string): Promise<
   if (!deps.encryptionKey) {
     return jsonError(500, "INTERNAL", "ENCRYPTION_KEY is not configured");
   }
-  const providers = await deps.db.all<{ id: string }>("SELECT id FROM provider WHERE id = ?", [providerId]);
+  const providers = await deps.db.all<{ type: string }>("SELECT type FROM provider WHERE id = ?", [providerId]);
   if (providers.length === 0) return jsonError(404, "NOT_FOUND", `provider ${providerId} not found`);
   const endpoints = await deps.db.all<{ protocol: string; base_url: string }>(
     "SELECT protocol, base_url FROM provider_endpoint WHERE provider_id = ?",
@@ -1364,6 +1368,14 @@ async function listProviderModels(deps: AdminDeps, providerId: string): Promise<
   );
   if (endpoints.length === 0) {
     return jsonError(400, "BAD_REQUEST", "this provider has no endpoints configured");
+  }
+  const preset = findPresetProvider(providers[0]!.type);
+  const documented = preset?.model_list_protocols;
+  const discoverable = documented === undefined
+    ? endpoints
+    : endpoints.filter((endpoint) => documented.some((protocol) => protocol === endpoint.protocol));
+  if (discoverable.length === 0) {
+    return jsonError(400, "BAD_REQUEST", "no documented model list for the configured protocols");
   }
   const keyRows = await deps.db.all<{ encrypted_key: string }>(
     "SELECT encrypted_key FROM provider_key WHERE provider_id = ? AND enabled = 1 LIMIT 1",
@@ -1381,13 +1393,13 @@ async function listProviderModels(deps: AdminDeps, providerId: string): Promise<
   }
   // 端点尝试顺序：openai 列表语义最标准 → responses → anthropic → gemini。
   const order = ["openai", "responses", "anthropic", "gemini"];
-  const sorted = [...endpoints].sort(
+  const sorted = [...discoverable].sort(
     (a, b) => (order.indexOf(a.protocol) + 1 || order.length) - (order.indexOf(b.protocol) + 1 || order.length),
   );
   const errors: string[] = [];
   for (const ep of sorted) {
     const result = await fetchUpstreamModels(
-      { baseUrl: ep.base_url, apiKey, protocol: ep.protocol as Protocol },
+      { baseUrl: ep.base_url, apiKey, protocol: ep.protocol as Protocol, query: preset?.model_list_query },
       deps.testFetcher,
     );
     if (result.ok) {

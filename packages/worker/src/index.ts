@@ -10,14 +10,15 @@ import {
   QuotaLedger,
 } from "@lutragate/core";
 import type { Clock, ConfigStore, Fetcher, KeyState, LogSink, Rng } from "@lutragate/core";
-import { VERSION } from "@lutragate/shared";
 import type { GatewayConfig, ProviderKey } from "@lutragate/shared";
 import { loadConfig } from "./config";
 import { D1AdminDb } from "./d1";
 import { D1LogSink } from "./log-sink";
 import type { Env } from "./env";
 
-export { VERSION };
+// （builtin-web 02）顶层 `export { VERSION }` 会让 workerd 拒绝启动——非 handler
+// 的命名导出不被接受（"not of type 'function or ExportedHandler'"）。该再导出无
+// 任何消费者，直接删除；版本号走 @lutragate/shared 自取。
 
 export interface HandlerDeps {
   /** Override for tests; defaults to native fetch. */

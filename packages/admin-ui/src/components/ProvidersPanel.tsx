@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, CircleCheck, CircleDashed, ExternalLink } from "lucide-react";
 import type { AdminApi, KeyRow, ProviderRow } from "../lib/api";
 import { parseLimitInput } from "../lib/quota";
 import { toErrorMessage } from "../lib/error";
@@ -13,6 +13,25 @@ import { Modal } from "./Modal";
 import { useToast } from "./Toast";
 import { EndpointTestRunner, type EndpointSpec } from "./EndpointTestRunner";
 import { DetailPage } from "./SplitDetail";
+
+function PresetVerification({ verified }: { verified: boolean }) {
+  const { t } = useTranslation();
+  const label = t(verified ? "providers.form.verifiedPreset" : "providers.form.pendingVerification");
+  const Icon = verified ? CircleCheck : CircleDashed;
+
+  return (
+    <span
+      className="prov-preset-status"
+      data-verified={verified}
+      data-tooltip={label}
+      role="img"
+      aria-label={label}
+      tabIndex={0}
+    >
+      <Icon size={15} aria-hidden="true" />
+    </span>
+  );
+}
 
 interface EndpointRow {
   protocol: string;
@@ -201,6 +220,7 @@ export function ProvidersPanel({ api }: { api: AdminApi }) {
           <div className="rowlist">
             {visibleProviders.map((p) => {
               const health = providerHealth(keys, p);
+              const preset = findPresetProvider(p.type);
               const endpointList = PROTOCOLS.filter((protocol) => p.endpoints[protocol] !== undefined);
               return (
                 // reference 宽行：左侧信息双行直排（类型徽标 / 格式+权重+健康度，
@@ -212,10 +232,21 @@ export function ProvidersPanel({ api }: { api: AdminApi }) {
                       <strong>{p.name}</strong>
                       {/* 供应商类型徽标：custom / 目录外类型显示「自定义」。 */}
                       <span className="badge on">
-                        {p.type !== CUSTOM_PROVIDER_TYPE && findPresetProvider(p.type)
-                          ? findPresetProvider(p.type)!.label
-                          : t("providers.category.custom")}
+                        {preset?.label ?? t("providers.category.custom")}
                       </span>
+                      {preset && <PresetVerification verified={Boolean(preset.verified)} />}
+                      {preset?.documentation_url && (
+                        <a
+                          className="prov-preset-doc-link"
+                          href={preset.documentation_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          aria-label={t("providers.form.presetDocsAria", { name: preset.label })}
+                          title={t("providers.form.officialDocs")}
+                        >
+                          <ExternalLink size={14} aria-hidden="true" />
+                        </a>
+                      )}
                     </span>
                     <span className="item-meta">
                       {/* 权重最左 + 固定宽度：多行格式徽标纵向对齐。 */}
@@ -383,12 +414,17 @@ function ProviderForm({
       ];
       setRows(presetRows);
     }
-    if (name.length === 0) setName(preset.label);
+    if (name.length === 0 || name === findPresetProvider(type)?.label) setName(preset.label);
   };
 
-  // 类型下拉逐步放开制（model-discovery 拍板）：只列已验证 preset；
-  // 编辑态豁免当前供应商已有类型（存量行不受门槛影响）。
+  const selectedPreset = findPresetProvider(type);
   const groups = presetGroups(selectablePresets(provider?.type));
+  const renderPresetOption = (preset: PresetProvider) => (
+    <option key={preset.id} value={preset.id}>
+      {preset.label}
+      {preset.self_hosted ? "" : `（${preset.base_url}）`}
+    </option>
+  );
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -438,22 +474,24 @@ function ProviderForm({
               {groups.map((group) =>
                 group.vendor !== null ? (
                   <optgroup key={group.vendor} label={group.vendor}>
-                    {group.presets.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.label}{p.self_hosted ? "" : `（${p.base_url}）`}
-                      </option>
-                    ))}
+                    {group.presets.map(renderPresetOption)}
                   </optgroup>
                 ) : (
-                  group.presets.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.label}{p.self_hosted ? "" : `（${p.base_url}）`}
-                    </option>
-                  ))
+                  group.presets.map(renderPresetOption)
                 ),
               )}
             </select>
           </label>
+          {selectedPreset && (
+            <div className="prov-preset-meta">
+              <PresetVerification verified={Boolean(selectedPreset.verified)} />
+              {selectedPreset.documentation_url && (
+                <a href={selectedPreset.documentation_url} target="_blank" rel="noreferrer">
+                  {t("providers.form.officialDocs")}
+                </a>
+              )}
+            </div>
+          )}
           <label className="field-row">
             {t("providers.form.name")}
             <input value={name} onChange={(e) => setName(e.target.value)} required />
@@ -558,7 +596,7 @@ function ConnectivityTest({ api, provider }: { api: AdminApi; provider: Provider
   const { t } = useTranslation();
   const [apiKey, setApiKey] = useState("");
   const [model, setModel] = useState("");
-  const specs: EndpointSpec[] = (["openai", "anthropic"] as const)
+  const specs: EndpointSpec[] = PROTOCOLS
     .filter((protocol) => provider.endpoints[protocol] !== undefined)
     .map((protocol) => ({ protocol, baseUrl: provider.endpoints[protocol]! }));
   const preset = findPresetProvider(provider.type);
@@ -578,7 +616,7 @@ function ConnectivityTest({ api, provider }: { api: AdminApi; provider: Provider
           specs={specs}
           model={model}
           onModelChange={setModel}
-          placeholder={preset?.suggested_models[0] ?? "glm-4.5 / deepseek-chat"}
+          placeholder={preset?.suggested_models[0] ?? t("connectivity.modelPh")}
           modelCandidates={candidates ?? []}
           hint={
             <small className="hint-inline">

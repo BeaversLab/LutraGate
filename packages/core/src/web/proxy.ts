@@ -1,5 +1,5 @@
 import type { SelectedChannel } from "../select-channel";
-import { chatCompletionsUrl, type Protocol } from "@lutragate/shared";
+import { chatCompletionsUrl, responsesUrl, type Protocol } from "@lutragate/shared";
 
 /**
  * OpenAI Chat Completions request rewriting and response forwarding
@@ -214,7 +214,7 @@ export function buildResponsesRequest(
   }
   const headers = copyFilteredHeaders(clientHeaders, STRIPPED_REQUEST_HEADERS);
   headers.set("authorization", `Bearer ${plaintextKey}`);
-  const url = `${base.trim().replace(/\/+$/, "")}/v1/responses`;
+  const url = responsesUrl(base);
   return new Request(url, {
     method: "POST",
     headers,

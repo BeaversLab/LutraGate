@@ -444,15 +444,36 @@ describe("ProvidersPanel preset providers", () => {
     expect(labels).toContain("智谱");
     expect(labels).toContain("火山引擎");
     const zhipuGroup = groupsArr.find((g) => g.getAttribute("label") === "智谱")!;
-    expect(zhipuGroup.querySelectorAll("option")).toHaveLength(2); // GLM + Coding Plan
+    expect(zhipuGroup.querySelectorAll("option")).toHaveLength(3); // 国内普通 API、国内套餐、国际普通 API
     // 自定义选项在 optgroup 之外。
     const topLevelOptions = [...select.children].filter((c) => c.tagName === "OPTION");
     expect(topLevelOptions.some((o) => (o as HTMLOptionElement).value === "custom")).toBe(true);
-    // 逐步放开制：未验证 preset 彻底隐藏（model-discovery 拍板）。
+    // 官方文档已核对的预设和已实测预设都可选择。
     const optionValues = [...select.querySelectorAll("option")].map((o) => (o as HTMLOptionElement).value);
-    expect(optionValues).not.toContain("openai");
+    expect(optionValues).toEqual(expect.arrayContaining(["openai", "anthropic", "google", "groq", "openrouter", "xai", "mistral"]));
     expect(optionValues).not.toContain("deepseek");
     expect(optionValues).not.toContain("moonshot");
+  });
+
+  it("offers documented international presets as untested and fills their own endpoints", async () => {
+    const api = makeApi(() => jsonResponse([provider]));
+    render(<ProvidersPanel api={api} />);
+    fireEvent.click(await screen.findByRole("button", { name: "新增供应商" }));
+    const select = screen.getByLabelText(/供应商类型/, { selector: "select" });
+    const option = screen.getByRole("option", { name: /Z\.ai/ }) as HTMLOptionElement;
+    expect(option.textContent).not.toContain("待实测");
+    fireEvent.change(select, { target: { value: option.value } });
+    expect((screen.getByLabelText(/OpenAI 格式 端点地址/) as HTMLInputElement).value).toBe(
+      "https://api.z.ai/api/paas/v4",
+    );
+    expect(screen.getByRole("img", { name: "预设待实测" })).toBeTruthy();
+    fireEvent.change(select, { target: { value: "zhipu" } });
+    expect(screen.getByRole("img", { name: "预设已实测" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "官方接入文档" }).getAttribute("href"))
+      .toBe("https://docs.bigmodel.cn/cn/guide/start/quick-start");
+    fireEvent.change(select, { target: { value: "zhipu-coding" } });
+    expect(screen.getByRole("link", { name: "官方接入文档" }).getAttribute("href"))
+      .toBe("https://docs.bigmodel.cn/cn/coding-plan/quick-start");
   });
 
   it("exempts the current type from the verified gate when editing an existing provider", async () => {
@@ -463,7 +484,7 @@ describe("ProvidersPanel preset providers", () => {
     const optionValues = [...select.querySelectorAll("option")].map((o) => (o as HTMLOptionElement).value);
     // 编辑态豁免：已有类型仍可选（存量行不受门槛影响），但其他未验证 preset 依旧隐藏。
     expect(optionValues).toContain("moonshot");
-    expect(optionValues).not.toContain("openai");
+    expect(optionValues).toContain("openai");
     expect(optionValues).not.toContain("deepseek");
     expect((select as HTMLSelectElement).value).toBe("moonshot");
   });
@@ -472,6 +493,16 @@ describe("ProvidersPanel preset providers", () => {
     const api = makeApi(() => jsonResponse([{ ...provider, type: "moonshot" }]));
     render(<ProvidersPanel api={api} />);
     expect(await screen.findByText("Moonshot（月之暗面 Kimi）")).toBeTruthy();
+  });
+
+  it("links to the verified AgentPlan documentation from the provider list", async () => {
+    const api = makeApi(() => jsonResponse([{ ...provider, type: "volcengine-plan" }]));
+    render(<ProvidersPanel api={api} />);
+    const link = await screen.findByRole("link", { name: /火山方舟 AgentPlan.*官方接入文档/ });
+    expect(link.getAttribute("href")).toBe(
+      "https://console.volcengine.com/ark/region:cn-beijing/docs/agent-plan-personal-get-started",
+    );
+    expect(screen.getByRole("img", { name: "预设已实测" }).nextElementSibling).toBe(link);
   });
 
   it("categorizes preset providers into the text tab (category source = preset.category)", async () => {

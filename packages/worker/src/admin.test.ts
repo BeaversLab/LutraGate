@@ -1,4 +1,4 @@
-import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { env } from "cloudflare:test";
 import { handleAdmin, SqlConfigStore } from "@lutragate/core";
 import { D1AdminDb } from "./d1";
@@ -196,6 +196,45 @@ describe("admin CORS (spec §3.5)", () => {
     expect(evil.status).toBe(403);
   });
 
+  it("builtin-web：同源浏览器 origin 一律放行（内置管理端由网关自身端出）", async () => {
+    // 请求 URL 与 origin 同源（Worker 形态 request.url 即公网地址）。
+    const same = await handleAdmin(
+      new Request("https://gw.example.com/admin/providers", {
+        headers: { origin: "https://gw.example.com", "x-admin-token": "admin-secret" },
+      }),
+      adminDeps(),
+    );
+    expect(same.status).toBe(200);
+
+    // Server 形态反代后：公网 origin 经 X-Forwarded-Proto/Host 推导（内部明文监听）。
+    const forwarded = await handleAdmin(
+      new Request("http://10.0.0.5:8787/admin/providers", {
+        headers: {
+          origin: "https://gw.example.com",
+          "x-forwarded-proto": "https",
+          "x-forwarded-host": "gw.example.com",
+          "x-admin-token": "admin-secret",
+        },
+      }),
+      adminDeps(),
+    );
+    expect(forwarded.status).toBe(200);
+
+    // 转发头与 origin 不一致（伪同源）仍然 403。
+    const spoof = await handleAdmin(
+      new Request("http://10.0.0.5:8787/admin/providers", {
+        headers: {
+          origin: "https://evil.example",
+          "x-forwarded-proto": "https",
+          "x-forwarded-host": "gw.example.com",
+          "x-admin-token": "admin-secret",
+        },
+      }),
+      adminDeps(),
+    );
+    expect(spoof.status).toBe(403);
+  });
+
   it("serves non-browser clients without an Origin header", async () => {
     const resp = await callAdmin("GET", "/admin/providers");
     expect(resp.status).toBe(200);
@@ -383,6 +422,43 @@ describe("key-level connectivity test (server-side)", () => {
 });
 
 describe("provider model discovery (model-discovery 01)", () => {
+  it("discovers SiliconFlow international chat models through the documented filter", async () => {
+    const created = await callAdmin("POST", "/admin/providers", {
+      name: "SiliconFlow", type: "siliconflow-global", endpoints: { openai: "https://api.siliconflow.com/v1" },
+    });
+    expect(created.status).toBe(201);
+    const { id } = await created.json() as { id: string };
+    await callAdmin("POST", "/admin/keys", { provider_id: id, api_key: "test-key" });
+    const fetch = vi.fn(async (request: Request) => {
+      expect(request.url).toBe("https://api.siliconflow.com/v1/models?sub_type=chat");
+      expect(request.headers.get("authorization")).toBe("Bearer test-key");
+      return Response.json({ data: [{ id: "deepseek-ai/DeepSeek-V4-Pro-0813" }] });
+    });
+    const response = await handleAdmin(
+      adminReq("GET", `/admin/providers/${id}/models`),
+      adminDeps(ADMIN_ENV, false, { fetch }),
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ models: ["deepseek-ai/DeepSeek-V4-Pro-0813"] });
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not send credentials to a model-list URL absent from a provider's API docs", async () => {
+    const { id: providerId } = await createProvider();
+    const updated = await callAdmin("PUT", `/admin/providers/${providerId}`, {
+      type: "minimax-global", endpoints: { openai: "https://api.minimax.io/v1" },
+    });
+    expect(updated.status).toBe(200);
+    await callAdmin("POST", "/admin/keys", { provider_id: providerId, api_key: "test-key" });
+    const fetch = vi.fn(async () => Response.json({ data: [] }));
+    const resp = await handleAdmin(
+      adminReq("GET", `/admin/providers/${providerId}/models`),
+      adminDeps(ADMIN_ENV, false, { fetch }),
+    );
+    expect(resp.status).toBe(400);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it("decrypts a key, GETs the upstream models list and returns sorted unique ids", async () => {
     const { id: providerId } = await createProvider();
     await callAdmin("POST", "/admin/keys", { provider_id: providerId, api_key: "sk-models-key" });
@@ -917,6 +993,29 @@ describe("key management credentials + volcengine usage (provider-usage 02/04, k
 });
 
 describe("provider connectivity test relay (provider-usage 03)", () => {
+  it("tests the configured Qianfan Responses endpoint with its documented request shape", async () => {
+    const created = await callAdmin("POST", "/admin/providers", {
+      name: "Qianfan", type: "qianfan", endpoints: {
+        openai: "https://qianfan.baidubce.com/v2", responses: "https://qianfan.baidubce.com/v2",
+      },
+    });
+    expect(created.status).toBe(201);
+    const { id } = await created.json() as { id: string };
+    const fetch = vi.fn(async (req: Request) => {
+      expect(req.url).toBe("https://qianfan.baidubce.com/v2/responses");
+      expect(req.headers.get("authorization")).toBe("Bearer test-key");
+      expect(await new Response(req.body).json()).toEqual({ model: "qwen3-14b", input: "Reply with just OK." });
+      return Response.json({ output: [{ content: [{ type: "output_text", text: "OK" }] }] });
+    });
+    const response = await handleAdmin(
+      adminReq("POST", `/admin/providers/${id}/test`, { api_key: "test-key", protocol: "responses" }),
+      adminDeps(ADMIN_ENV, false, { fetch }),
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ ok: true, protocol: "responses", replyPreview: "OK" });
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
   it("relays the hand-entered key to the chosen endpoint, defaulting the model from mappings", async () => {
     const { id: providerId } = await createProvider();
     await callAdmin("POST", "/admin/mappings", { client_model: "m1", provider_id: providerId, upstream_model: "a-up" });
@@ -964,7 +1063,7 @@ describe("provider connectivity test relay (provider-usage 03)", () => {
     );
     expect(out.status).toBe(200);
     const body = (await out.json()) as { model: string; ok: boolean };
-    expect(body.model).toBe("doubao-pro-32k"); // preset suggested_models[0]
+    expect(body.model).toBe("doubao-seed-2-1-lite-260915"); // preset suggested_models[0]
     expect(seen[0]!.url).toBe("https://ark.cn-beijing.volces.com/api/plan/v1/messages");
     expect(seen[0]!.headers.get("x-api-key")).toBe("sk-xyz"); // anthropic 形鉴权
   });
@@ -989,7 +1088,7 @@ describe("provider connectivity test relay (provider-usage 03)", () => {
       adminReq("POST", `/admin/providers/${providerId}/test`, { api_key: "sk-1234", protocol: "gemini" }),
       adminDeps(ADMIN_ENV, false, noop),
     );
-    expect(badProtocol.status).toBe(400); // 只放行 openai/anthropic（UI 的端点档）
+    expect(badProtocol.status).toBe(400); // 支持 Gemini 协议，但当前供应商未配置该端点
 
     const missingEndpoint = await handleAdmin(
       adminReq("POST", `/admin/providers/${providerId}/test`, { api_key: "sk-1234", protocol: "anthropic" }),

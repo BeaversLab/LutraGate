@@ -226,7 +226,7 @@ describe("MappingsPanel mapping form (model-discovery 01, edit page)", () => {
     expect(upstream.value).toBe("glm-4.6");
     unmount();
 
-    // 拉取失败 → 回落预设静态清单（zhipu → glm-4.5 等）。
+    // 拉取失败 → 回落预设静态清单（zhipu → glm-5.3-flash 等）。
     render(<MappingsPanel api={makeApi()} />);
     fireEvent.click(await screen.findByRole("button", { name: "新增映射" }));
     await waitFor(() => expect(screen.getByText(/预设清单/)).toBeTruthy());
@@ -285,7 +285,7 @@ describe("MappingsPanel import from upstream (model-discovery 01, edit page)", (
         if (url.endsWith("/admin/mappings") && init?.method === "POST") {
           const body = JSON.parse(init!.body as string);
           posted.push(body.client_model);
-          if (body.client_model === "glm-4.5") {
+          if (body.client_model === "glm-5.3-flash") {
             return jsonResponse({ error: { code: "CONFLICT", message: "mapping ... exists" } }, 409);
           }
           return jsonResponse({ id: "m-new" }, 201);
@@ -296,7 +296,7 @@ describe("MappingsPanel import from upstream (model-discovery 01, edit page)", (
     render(<MappingsPanel api={api} />);
     fireEvent.click(await screen.findByRole("button", { name: "从上游导入" }));
     await screen.findByRole("region", { name: "从上游导入映射" });
-    await waitFor(() => expect(screen.getByText(/预设清单/)).toBeTruthy()); // zhipu → glm-4.5 / glm-4-flash
+    await waitFor(() => expect(screen.getByText(/预设清单/)).toBeTruthy()); // zhipu → glm-5.3-flash / glm-5.3
 
     fireEvent.click(screen.getByRole("button", { name: "全选" }));
     fireEvent.click(screen.getByRole("button", { name: /导入所选/ }));
@@ -307,7 +307,7 @@ describe("MappingsPanel import from upstream (model-discovery 01, edit page)", (
 
     // 成功项已移出候选：再次导入只重试失败项，不重复提交已建映射。
     fireEvent.click(screen.getByRole("button", { name: /导入所选/ }));
-    await waitFor(() => expect(posted).toEqual(["glm-4.5", "glm-4-flash", "glm-4.5"]));
-    expect(screen.queryByText("glm-4-flash", { selector: ".import-candidates .mono" })).toBeNull();
+    await waitFor(() => expect(posted).toEqual(["glm-5.3-flash", "glm-5.3", "glm-5.3-flash"]));
+    expect(screen.queryByText("glm-5.3", { selector: ".import-candidates .mono" })).toBeNull();
   });
 });

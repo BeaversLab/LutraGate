@@ -9,7 +9,7 @@ import { formatDateTime } from "../lib/format";
 import { useConfirm } from "./ConfirmModal";
 import { Modal } from "./Modal";
 import { useToast } from "./Toast";
-import { findPresetProvider } from "@lutragate/shared";
+import { PROTOCOLS, findPresetProvider } from "@lutragate/shared";
 import { EndpointTestRunner, type EndpointSpec } from "./EndpointTestRunner";
 import { KeyUsageCell } from "./KeyUsageCell";
 import { DetailPage } from "./SplitDetail";
@@ -581,7 +581,7 @@ function KeyTestRunner({
 
   const provider = providers.find((p) => p.id === keyRow.provider_id);
   const preset = findPresetProvider(provider?.type ?? "");
-  const specs: EndpointSpec[] = (["openai", "anthropic"] as const)
+  const specs: EndpointSpec[] = PROTOCOLS
     .filter((protocol) => provider?.endpoints[protocol] !== undefined)
     .map((protocol) => ({ protocol, baseUrl: provider!.endpoints[protocol]! }));
 
@@ -592,7 +592,7 @@ function KeyTestRunner({
         specs={specs}
         model={model}
         onModelChange={setModel}
-        placeholder={preset?.suggested_models[0] ?? "glm-4.5 / deepseek-chat"}
+        placeholder={preset?.suggested_models[0] ?? t("connectivity.modelPh")}
         modelCandidates={preset?.suggested_models ?? []}
         run={async (protocol) => {
           try {

@@ -1,6 +1,9 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
+import { serveStatic } from "hono/bun";
+import type { MiddlewareHandler } from "hono";
 import {
   CachedConfigStore,
   createGatewayHandler,
@@ -27,6 +30,11 @@ export interface ServerOptions {
   dbPath?: string;
   /** 发布信息（/version 注入缝，测试用）；缺省读 release-info.json，缺失回退空。 */
   releaseInfo?: ReleaseInfo;
+  /**
+   * 内置 Web 管理端的静态资产目录（builtin-web 01，注入缝，测试用）。未提供 = 静态
+   * 服务关闭（本地开发/纯 API 用法，原行为）；生产入口缺省探测镜像内 admin-ui dist。
+   */
+  assetsDir?: string | null;
 }
 
 export function createApp(options: ServerOptions = {}) {
@@ -98,6 +106,37 @@ export function createApp(options: ServerOptions = {}) {
       invalidate: () => cache.invalidate(),
     });
   }
+
+  // 内置 Web 管理端（builtin-web 01，ADR-0004）：同源端出 admin-ui 静态产物。
+  // API 优先不变式：/v1、/admin、/version、/health（含未知子路径、编码与重复斜杠
+  // 变体）永远先于静态服务与 SPA 回退——回退 index.html 只接住「既非资产也非 API」
+  // 的 GET/HEAD 路径。
+  if (options.assetsDir !== undefined && options.assetsDir !== null) {
+    const assetsRoot = options.assetsDir;
+    // 判定前先解码 %XX 并折叠重复斜杠——`/v1%2ffoo`、`//v1/models` 这类变体此前
+    // 由 gateway 回 JSON，不能被 SPA 回退变成 index.html。
+    const isApiPath = (raw: string) => {
+      let p = raw;
+      try {
+        p = decodeURIComponent(raw);
+      } catch {
+        // 非法编码：按原样参与前缀判定，不放大。
+      }
+      p = p.replace(/\/{2,}/g, "/");
+      const under = (prefix: string) => p === prefix || p.startsWith(`${prefix}/`);
+      // /v1beta 是与 /v1 不同的段（Gemini 原生面），/v1 前缀判定不覆盖它。
+      return (
+        under("/v1") || under("/v1beta") || under("/admin") || under("/version") || under("/health")
+      );
+    };
+    // guard：API 路径跳过静态层，交给已注册的 admin/version 路由或 gateway 兜底。
+    const notApi = (handler: MiddlewareHandler): MiddlewareHandler => (c, next) =>
+      isApiPath(c.req.path) ? next() : handler(c, next);
+    // 存在的资产文件（serveStatic 未命中时 next() 落到 SPA 回退）。
+    app.get("*", notApi(serveStatic({ root: assetsRoot })));
+    // SPA 回退：前端路由深链/刷新不 404。
+    app.get("*", notApi(serveStatic({ root: assetsRoot, path: "index.html" })));
+  }
   app.all("*", (c) => gateway(c.req.raw));
   return app;
 }
@@ -116,7 +155,11 @@ function clientIpFrom(request: Request, env: ServerEnv): string | null {
 // Entrypoint: `bun run src/index.ts`
 if (import.meta.main) {
   const env = loadEnv();
-  const app = createApp({ env });
+  // 内置 Web 管理端缺省资产目录：镜像内 admin-ui dist（构建烤入）；不存在 = 关闭
+  //（本地纯 API 开发形态），不打扰现有工作流。
+  const defaultAssetsDir = resolve(import.meta.dir, "../../admin-ui/dist");
+  const assetsDir = existsSync(defaultAssetsDir) ? defaultAssetsDir : null;
+  const app = createApp({ env, assetsDir });
   // 自签名证书 HTTPS（tailnet 不支持 tailscale cert 的部署形态）：给出证书对时启用
   // TLS；Bun 原生接受，WKWebView/浏览器经本机信任 CA 后直接可用，满足 macOS ATS。
   const tls =
@@ -125,6 +168,7 @@ if (import.meta.main) {
       : undefined;
   Bun.serve({ port: env.port, fetch: app.fetch, tls });
   console.log(
-    `lutragate server listening on :${env.port}${tls !== undefined ? " (tls)" : ""} (db: ${env.dbPath})`,
+    `lutragate server listening on :${env.port}${tls !== undefined ? " (tls)" : ""} (db: ${env.dbPath})` +
+      `${assetsDir !== null ? " (web ui: on)" : " (web ui: off — build admin-ui to enable)"}`,
   );
 }

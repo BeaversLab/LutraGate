@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { EnvSelect } from "./EnvSelect";
 import type { AdminApi, ServerRelease } from "../lib/api";
 import { detectDesktopVersion } from "../lib/desktop-version";
+import { defaultGatewayUrl } from "../lib/envs";
 
 /** 连接设置草稿（multi-env 01）：新建/编辑环境共用的三字段。 */
 export interface SettingsDraft {
@@ -25,6 +26,7 @@ export interface EnvChip {
  */
 export function SettingsBar({
   environments,
+  fixedGatewayUrl,
   activeEnvId,
   initial,
   onSave,
@@ -36,6 +38,8 @@ export function SettingsBar({
 }: {
   /** 全部已登记环境（chips 顺序即列表序）。 */
   environments: EnvChip[];
+  /** 内置 Web 仅管理当前网关的凭证。 */
+  fixedGatewayUrl?: string;
   /** 活跃环境 id；null = 零环境（首启引导 = 新建模式）。 */
   activeEnvId: string | null;
   /** 活跃环境的当前值（编辑表单回填）；零环境时忽略。 */
@@ -55,7 +59,8 @@ export function SettingsBar({
 }) {
   const { t } = useTranslation();
   // 零环境 = 首启引导，直接进入新建模式（multi-env 01 的上手路径）。
-  const [creating, setCreating] = useState(activeEnvId === null);
+  const multiEnv = fixedGatewayUrl === undefined;
+  const [creating, setCreating] = useState(multiEnv && activeEnvId === null);
   // 服务器发布信息（/version）：拉取失败/旧服务器 404 → 保持 null 不显示，不打扰设置页。
   const [release, setRelease] = useState<ServerRelease | null>(null);
   useEffect(() => {
@@ -84,13 +89,15 @@ export function SettingsBar({
   const defaultName = t("settings.defaultEnvName");
   const initialName = initial.name === "" ? defaultName : initial.name;
   const [name, setName] = useState(creating ? defaultName : initialName);
-  const [gatewayUrl, setGatewayUrl] = useState(creating ? "" : initial.gatewayUrl);
+  // 同源预填（builtin-web 03）：新建模式默认当前 origin（内置 Web 端少填一次）；
+  // 桌面/自定义协议形态回退空串，行为与旧版一致。
+  const [gatewayUrl, setGatewayUrl] = useState(creating ? defaultGatewayUrl() : initial.gatewayUrl);
   const [managementToken, setManagementToken] = useState(creating ? "" : initial.managementToken);
 
   const startCreate = () => {
     setCreating(true);
     setName(defaultName);
-    setGatewayUrl("");
+    setGatewayUrl(defaultGatewayUrl());
     setManagementToken("");
   };
 
@@ -99,7 +106,7 @@ export function SettingsBar({
       className="settings"
       onSubmit={(e) => {
         e.preventDefault();
-        const draft: SettingsDraft = { name, gatewayUrl, managementToken };
+        const draft: SettingsDraft = { name, gatewayUrl: fixedGatewayUrl ?? gatewayUrl, managementToken };
         // 创建后 App 重挂载本组件（活跃环境变更），本地无需复位。
         if (creating) onCreate(draft);
         else onSave(draft);
@@ -110,7 +117,7 @@ export function SettingsBar({
           {t("settings.secretDegraded")}
         </p>
       )}
-      {environments.length > 0 && (
+      {multiEnv && environments.length > 0 && (
         <div className="env-chips">
           {/* 与侧栏同一环境切换下拉（UI 2.0 统一入口）；aria 名用「切换环境」
               避免与侧栏下拉同屏重名（测试/读屏均按名字定位）。 */}
@@ -126,14 +133,17 @@ export function SettingsBar({
         </div>
       )}
       {creating ? <p className="hint">{t("settings.createHint")}</p> : null}
-      <label>
-        {t("settings.name")}
-        <input value={name} onChange={(e) => setName(e.target.value)} placeholder={t("settings.namePlaceholder")} />
-      </label>
+      {multiEnv && (
+        <label>
+          {t("settings.name")}
+          <input value={name} onChange={(e) => setName(e.target.value)} placeholder={t("settings.namePlaceholder")} />
+        </label>
+      )}
       <label>
         {t("settings.url")}
         <input
-          value={gatewayUrl}
+          value={fixedGatewayUrl ?? gatewayUrl}
+          readOnly={!multiEnv}
           onChange={(e) => setGatewayUrl(e.target.value)}
           placeholder="http://localhost:8787"
         />
@@ -168,13 +178,11 @@ export function SettingsBar({
       ) : (
         <>
           <button type="submit">{t("settings.save")}</button>
-          <button
-            type="button"
-            className="env-delete"
-            onClick={() => onDelete(activeEnvId!)}
-          >
-            {t("settings.deleteEnv")}
-          </button>
+          {multiEnv && activeEnvId !== null && (
+            <button type="button" className="env-delete" onClick={() => onDelete(activeEnvId)}>
+              {t("settings.deleteEnv")}
+            </button>
+          )}
         </>
       )}
       {release && (

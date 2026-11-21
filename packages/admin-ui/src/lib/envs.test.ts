@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   activeEnvOf,
+  defaultGatewayUrl,
   deleteEnvTokenEverywhere,
   emptyEnvState,
   envTokenKey,
@@ -278,5 +279,21 @@ describe("normalizeBaseUrl", () => {
     expect(normalizeBaseUrl("  http://x.test/  ")).toBe("http://x.test");
     expect(normalizeBaseUrl("http://x.test///")).toBe("http://x.test");
     expect(normalizeBaseUrl("http://x.test/v1/")).toBe("http://x.test/v1");
+  });
+});
+
+describe("defaultGatewayUrl（builtin-web 03 同源预填）", () => {
+  it("http/https origin → 原样返回（内置 server/worker 同源部署）", () => {
+    expect(defaultGatewayUrl({ protocol: "http:", origin: "http://127.0.0.1:8787" } as Location)).toBe(
+      "http://127.0.0.1:8787",
+    );
+    expect(defaultGatewayUrl({ protocol: "https:", origin: "https://gw.example.com" } as Location)).toBe(
+      "https://gw.example.com",
+    );
+  });
+
+  it("非 http(s)（桌面 tauri:/自定义协议、file:）→ 空串，不预填", () => {
+    expect(defaultGatewayUrl({ protocol: "tauri:", origin: "http://tauri.localhost" } as Location)).toBe("");
+    expect(defaultGatewayUrl({ protocol: "file:", origin: "null" } as Location)).toBe("");
   });
 });

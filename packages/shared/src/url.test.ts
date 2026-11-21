@@ -21,6 +21,12 @@ describe("chatCompletionsUrl", () => {
     );
   });
 
+  it("preserves the documented Gemini OpenAI compatibility path", () => {
+    const base = "https://generativelanguage.googleapis.com/v1beta/openai/";
+    expect(chatCompletionsUrl(base)).toBe("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions");
+    expect(modelsListUrl(base)).toBe("https://generativelanguage.googleapis.com/v1beta/openai/models");
+  });
+
   it("treats non-numeric suffixes as standard bases", () => {
     expect(chatCompletionsUrl("https://x.test/api")).toBe("https://x.test/api/v1/chat/completions");
     expect(chatCompletionsUrl("https://x.test/v1beta")).toBe("https://x.test/v1beta/v1/chat/completions");

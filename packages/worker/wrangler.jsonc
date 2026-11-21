@@ -3,6 +3,28 @@
   "name": "lutragate",
   "main": "src/index.ts",
   "compatibility_date": "2026-10-01",
+  // 内置 Web 管理端（builtin-web 02，ADR-0004）：admin-ui 静态产物由平台先于
+  // worker 代码服务（不消耗 worker 请求数配额）；SPA 回退只接非 API 路径——
+  // API 面（数据面 /v1 与 /v1beta、管理面 /admin、/version、/health——除 /version
+  // 外均由共享 gateway/admin handler 兜底）永远先进 worker 代码。裸路径与通配
+  // 都要：通配不保证匹配裸路径，裸路径不覆盖子路径；/v1 与 /v1beta 是不同段，
+  // /v1/* 不覆盖 /v1beta（守卫测试 assets-config.test.ts 锁定）。
+  "assets": {
+    "directory": "../admin-ui/dist",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": [
+      "/v1",
+      "/v1/*",
+      "/v1beta",
+      "/v1beta/*",
+      "/admin",
+      "/admin/*",
+      "/version",
+      "/version/*",
+      "/health",
+      "/health/*"
+    ]
+  },
   "d1_databases": [
     {
       "binding": "DB",

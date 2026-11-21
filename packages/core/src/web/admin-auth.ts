@@ -15,7 +15,7 @@ export interface AdminDb {
   run(sql: string, params: unknown[]): Promise<{ changes: number }>;
 }
 
-/** Allowed browser origins: local web app and the Tauri shell (spec §3.5). */
+/** Allowed cross-origin browser origins: local web app and the Tauri shell (spec §3.5). */
 const ALLOWED_ORIGIN = /^(http:\/\/localhost(:\d+)?|tauri:\/\/localhost)$/;
 
 const CORS_HEADERS: Record<string, string> = {
@@ -29,8 +29,29 @@ export function corsHeaders(origin: string): Record<string, string> {
   return { ...CORS_HEADERS, "access-control-allow-origin": origin };
 }
 
-export function isAllowedOrigin(origin: string | null): boolean {
-  return origin !== null && ALLOWED_ORIGIN.test(origin);
+/**
+ * builtin-web（ADR-0004）：请求的有效公网 origin 候选。同源请求一律放行——内置
+ * 管理端由网关自身端出，浏览器 origin 即网关自己的地址；反代形态（Server 形态
+ * TLS 终止在上游、内部明文监听）公网 origin 经 X-Forwarded-Proto/Host 推导。
+ * 非浏览器伪造这些头绕不过任何东西：guard 只是纵深防御，鉴权始终是 lgm_/Access。
+ */
+function sameOriginCandidates(request: Request): string[] {
+  const url = new URL(request.url);
+  const out = [url.origin];
+  const first = (name: string): string | null => {
+    const raw = request.headers.get(name);
+    return raw === null ? null : raw.split(",")[0]!.trim();
+  };
+  const proto = first("x-forwarded-proto");
+  const host = first("x-forwarded-host") ?? url.host;
+  if (proto !== null) out.push(`${proto}://${host}`);
+  return out;
+}
+
+export function isAllowedOrigin(origin: string | null, request?: Request): boolean {
+  if (origin === null) return false;
+  if (ALLOWED_ORIGIN.test(origin)) return true;
+  return request !== undefined && sameOriginCandidates(request).includes(origin);
 }
 
 /**
@@ -42,7 +63,7 @@ export function adminCorsGuard(request: Request): Response | null {
   const origin = request.headers.get("origin");
   if (origin === null) return null; // non-browser clients (curl, server-side)
 
-  if (!isAllowedOrigin(origin)) {
+  if (!isAllowedOrigin(origin, request)) {
     return jsonError(403, "FORBIDDEN", `origin ${origin} is not allowed`);
   }
   if (request.method === "OPTIONS") {

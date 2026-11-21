@@ -1,4 +1,7 @@
-import { beforeAll, beforeEach, describe, expect, it } from "bun:test";
+import { beforeAll, beforeEach, afterAll, describe, expect, it } from "bun:test";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   CachedConfigStore,
   createGatewayHandler,
@@ -1335,5 +1338,127 @@ describe("admin export envelope (desktop 06)", () => {
     expect(created.status).toBe(201);
     const mallory = (await created.json()) as { management_token: string };
     expect((await handleAdmin(reqAs(mallory.management_token, "GET", "/admin/export"), deps())).status).toBe(403);
+  });
+});
+
+describe("built-in web UI static serving (builtin-web 01)", () => {
+  let assetsDir: string;
+
+  beforeAll(() => {
+    // 临时资产目录（assetsDir 注入缝）：index.html 带标记串，嵌套资产一个。
+    assetsDir = mkdtempSync(join(tmpdir(), "lutragate-assets-"));
+    writeFileSync(
+      join(assetsDir, "index.html"),
+      "<!doctype html><html><body>lg-assets-index-marker</body></html>",
+    );
+    mkdirSync(join(assetsDir, "assets"), { recursive: true });
+    writeFileSync(join(assetsDir, "assets", "app.js"), "console.log('lg-assets-js-marker')");
+  });
+
+  afterAll(() => {
+    rmSync(assetsDir, { recursive: true, force: true });
+  });
+
+  function uiApp() {
+    return createApp({ env: env(), dbPath: ":memory:", assetsDir });
+  }
+
+  it("根路径与嵌套资产返回静态文件；SPA 深链回退 index.html", async () => {
+    const app = uiApp();
+    const root = await app.request("http://gw/");
+    expect(root.status).toBe(200);
+    expect(root.headers.get("content-type")).toContain("text/html");
+    expect(await root.text()).toContain("lg-assets-index-marker");
+
+    const asset = await app.request("http://gw/assets/app.js");
+    expect(asset.status).toBe(200);
+    expect(await asset.text()).toContain("lg-assets-js-marker");
+
+    // 前端路由深链（非资产非 API）→ index.html，刷新/深链不 404。
+    const deep = await app.request("http://gw/settings/keys");
+    expect(deep.status).toBe(200);
+    expect(await deep.text()).toContain("lg-assets-index-marker");
+  });
+
+  it("API 优先不变式：/v1、/admin、/version、/health 不被 SPA 回退吞掉", async () => {
+    const app = uiApp();
+
+    // /v1 鉴权门（JSON 错误，不是 index.html）——含未知子路径。
+    const v1 = await app.request("http://gw/v1/models");
+    expect(v1.status).toBe(401);
+    expect(v1.headers.get("content-type")).toContain("application/json");
+    const v1Err = (await v1.json()) as { error: { code: string } };
+    expect(v1Err.error.code).toBe("UNAUTHORIZED");
+
+    // 鉴权门先于路由（空库无此 key → 401 UNAUTHORIZED JSON，不是 index.html）。
+    const v1Unknown = await app.request("http://gw/v1/nonexistent", {
+      headers: { authorization: `Bearer ${LGK}` },
+    });
+    expect(v1Unknown.headers.get("content-type")).toContain("application/json");
+    const v1UnknownBody = (await v1Unknown.json()) as { error: { code: string } };
+    expect(v1UnknownBody.error.code).toBe("UNAUTHORIZED");
+
+    // 管理面：裸 /admin 与子路径照旧走 admin 面（401，非 HTML）。
+    const bareAdmin = await app.request("http://gw/admin");
+    expect(bareAdmin.status).toBe(401);
+    expect(bareAdmin.headers.get("content-type")).toContain("application/json");
+
+    // /version 与 /health 仍是 JSON 端点。
+    const version = await app.request("http://gw/version");
+    expect(version.status).toBe(200);
+    expect(version.headers.get("content-type")).toContain("application/json");
+    const health = await app.request("http://gw/health");
+    expect(health.status).toBe(200);
+  });
+
+  it("非 GET 的未知路径仍走 gateway（不回退 index.html），CORS 不变", async () => {
+    const app = uiApp();
+    const post = await app.request("http://gw/nope", { method: "POST" });
+    expect(post.headers.get("content-type")).toContain("application/json");
+
+    const corsResp = await app.request("http://gw/", {
+      headers: { origin: "http://localhost:5173" },
+    });
+    expect(corsResp.headers.get("access-control-allow-origin")).toBe("*");
+  });
+
+  it("API 优先不变式的路径变体：编码、重复斜杠、尾斜杠不被 SPA 吞掉", async () => {
+    const app = uiApp();
+    // %2f 编码的 API 子路径：gateway JSON（401），不是 index.html。
+    const encoded = await app.request("http://gw/v1%2fmodels");
+    expect(encoded.headers.get("content-type")).toContain("application/json");
+    // 重复斜杠变体：gateway JSON，不是 index.html。
+    const doubled = await app.request("http://gw//v1/models");
+    expect(doubled.headers.get("content-type")).toContain("application/json");
+    // 精确端点的尾斜杠：此前走 gateway 兜底回 404 JSON，仍不得变成 index.html。
+    const trailing = await app.request("http://gw/version/");
+    expect(trailing.headers.get("content-type")).toContain("application/json");
+    // Gemini 原生面：/v1beta 是独立路径段，不被 /v1 前缀判定覆盖。
+    const gemini = await app.request("http://gw/v1beta/models/gemini-2.0-flash:generateContent");
+    expect(gemini.headers.get("content-type")).toContain("application/json");
+  });
+
+  it("未开 assetsDir（默认）时静态服务关闭：根路径走 gateway 原行为", async () => {
+    const app = createApp({ env: env(), dbPath: ":memory:" });
+    const root = await app.request("http://gw/");
+    expect(root.status).toBe(401);
+    expect(root.headers.get("content-type")).toContain("application/json");
+  });
+
+  it("内置 Web 端浏览器 origin：同源放行（走到鉴权），跨域非白名单仍 403", async () => {
+    const app = uiApp();
+    // 同源 origin（如 LAN IP 直开内置管理端）：CORS 守卫放行 → 落到鉴权 401，而非 403。
+    const same = await app.request("http://gw/admin/providers", {
+      headers: { origin: "http://gw" },
+    });
+    expect(same.status).toBe(401);
+    expect((await same.json()) as { error: { code: string } }).toMatchObject({
+      error: { code: "UNAUTHORIZED" },
+    });
+
+    const evil = await app.request("http://gw/admin/providers", {
+      headers: { origin: "https://evil.example", "x-admin-token": "admin-secret" },
+    });
+    expect(evil.status).toBe(403);
   });
 });

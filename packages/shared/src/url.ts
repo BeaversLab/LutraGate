@@ -3,11 +3,11 @@
  *
  * - base_url 以 "/v<数字>" 结尾（如智谱 /api/paas/v4、火山方舟 /api/v3）：
  *   该路径段本身就是版本号，直接拼 "/chat/completions"；
+ * - Gemini 兼容端点 "/v1beta/openai" 也已带版本；
  * - 其余（标准 OpenAI 兼容端点）拼 "/v1/chat/completions"。
  */
 export function chatCompletionsUrl(baseUrl: string): string {
-  const base = baseUrl.trim().replace(/\/+$/, "");
-  return /\/v\d+$/.test(base) ? `${base}/chat/completions` : `${base}/v1/chat/completions`;
+  return `${openAiVersionedBase(baseUrl)}/chat/completions`;
 }
 
 /**
@@ -16,6 +16,15 @@ export function chatCompletionsUrl(baseUrl: string): string {
  * "/models"，标准 base 拼 "/v1/models"。
  */
 export function modelsListUrl(baseUrl: string): string {
+  return `${openAiVersionedBase(baseUrl)}/models`;
+}
+
+/** Responses uses the same versioned Base URL convention as Chat Completions. */
+export function responsesUrl(baseUrl: string): string {
+  return `${openAiVersionedBase(baseUrl)}/responses`;
+}
+
+function openAiVersionedBase(baseUrl: string): string {
   const base = baseUrl.trim().replace(/\/+$/, "");
-  return /\/v\d+$/.test(base) ? `${base}/models` : `${base}/v1/models`;
+  return /\/(?:v\d+|v1beta\/openai)$/.test(base) ? base : `${base}/v1`;
 }

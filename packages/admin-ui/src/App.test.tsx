@@ -1,9 +1,10 @@
 import "fake-indexeddb/auto";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { App } from "./App";
 import { contractRow } from "./lib/logstore.contract";
 import { LogDb } from "./lib/logdb";
+import { loadEnvState, loadEnvToken, saveEnvState, saveEnvToken } from "./lib/envs";
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -40,15 +41,18 @@ function openSettings() {
   fireEvent.click(screen.getByRole("button", { name: "环境设置" }));
 }
 
-/** 首启引导：填写地址 + lgm_ 并创建第一个环境（名字默认「默认」，multi-env 01）。 */
 async function saveCredentials() {
-  fireEvent.change(screen.getByPlaceholderText("http://localhost:8787"), {
-    target: { value: "http://localhost:8787" },
-  });
   fireEvent.change(screen.getByPlaceholderText("lgm_"), {
     target: { value: "lgm_management-token" },
   });
-  fireEvent.click(screen.getByRole("button", { name: "创建" }));
+  fireEvent.click(screen.getByRole("button", { name: "验证并登录" }));
+}
+
+function seedStandaloneHomeEnvironment(gatewayUrl: string) {
+  vi.stubEnv("VITE_LUTRAGATE_STANDALONE_WEB", "true");
+  const id = crypto.randomUUID();
+  saveEnvState(window.localStorage, { environments: [{ id, name: "家里", gatewayUrl }], activeEnvId: id });
+  saveEnvToken(window.localStorage, id, "lgm_home");
 }
 
 /** 环境设置页内的表单提交（编辑/新建环境）。环境名输入以 placeholder「默认」定位。 */
@@ -93,12 +97,105 @@ describe("App", () => {
     window.localStorage.clear();
   });
 
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  it("uses the current gateway's credentials even when a remote environment was active", async () => {
+    const here = { id: "local", name: "当前网关", gatewayUrl: window.location.origin };
+    const remote = { id: "remote", name: "其他网关", gatewayUrl: "https://other.example" };
+    saveEnvState(window.localStorage, { environments: [remote, here], activeEnvId: remote.id });
+    saveEnvToken(window.localStorage, here.id, "lgm_local");
+    saveEnvToken(window.localStorage, remote.id, "lgm_remote");
+    const mock = fetchMockFor(ADMIN_ME);
+    const fetcher = vi.fn((url: string, init?: RequestInit) => mock(url));
+    vi.stubGlobal("fetch", fetcher);
+
+    render(<App />);
+    await screen.findByRole("button", { name: "用户与授权" });
+    expect(screen.queryByRole("combobox", { name: "环境" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "环境设置" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "连接设置" }));
+    const gateway = screen.getByLabelText<HTMLInputElement>("网关地址");
+    expect(gateway.value).toBe(window.location.origin);
+    expect(gateway.readOnly).toBe(true);
+    expect(screen.queryByRole("combobox", { name: "切换环境" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /新建环境|删除环境/ })).toBeNull();
+    expect(screen.queryByLabelText("环境名")).toBeNull();
+
+    fireEvent.change(screen.getByLabelText("管理 Token"), { target: { value: "lgm_updated" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() => {
+      const meCalls = fetcher.mock.calls.filter(([url]) => url.endsWith("/admin/me"));
+      expect(meCalls.map(([url, init]) => [url, new Headers(init?.headers).get("x-admin-token")])).toEqual([
+        [`${window.location.origin}/admin/me`, "lgm_local"],
+        [`${window.location.origin}/admin/me`, "lgm_updated"],
+      ]);
+    });
+    expect(fetcher.mock.calls.every(([url]) => new URL(url, window.location.origin).origin === window.location.origin)).toBe(true);
+    expect(loadEnvState(window.localStorage).environments).toEqual([remote, here]);
+    expect(loadEnvToken(window.localStorage, remote.id)).toBe("lgm_remote");
+  });
+
+  it("prompts for a current gateway login when only a remote environment exists", async () => {
+    const remote = { id: "remote", name: "其他网关", gatewayUrl: "https://other.example" };
+    saveEnvState(window.localStorage, { environments: [remote], activeEnvId: remote.id });
+    saveEnvToken(window.localStorage, remote.id, "lgm_remote");
+    const fetcher = fetchMockFor(ADMIN_ME);
+    vi.stubGlobal("fetch", fetcher);
+
+    render(<App />);
+    expect(await screen.findByRole("heading", { name: "登录网关" })).toBeTruthy();
+    expect(fetcher).not.toHaveBeenCalled();
+    await saveCredentials();
+    await screen.findByRole("button", { name: "用户与授权" });
+
+    expect(fetcher.mock.calls.every(([url]) => new URL(url, window.location.origin).origin === window.location.origin)).toBe(true);
+    expect(loadEnvState(window.localStorage).environments).toContainEqual(remote);
+    expect(loadEnvToken(window.localStorage, remote.id)).toBe("lgm_remote");
+  });
+
   it("prompts for settings when none are stored", () => {
     render(<App />);
-    expect(screen.getByText(/请先填写网关地址与管理 Token/)).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "登录网关" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "供应商" })).toBeNull();
-    // 页脚同步条（UI 2.0 #11）：零环境无本地库 → 「尚未同步」措辞，不暗示在线状态。
-    expect(screen.getByText("尚未同步本地日志")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "环境设置" })).toBeNull();
+  });
+
+  it("首启页常驻「首次初始化」引导入口（builtin-web 03）；展开可填 ADMIN_TOKEN", () => {
+    render(<App />);
+    // 入口常驻（不做系统状态探测）；展开后出现 ADMIN_TOKEN 引导表单。
+    fireEvent.click(screen.getByRole("button", { name: "首次初始化" }));
+    expect(screen.getByPlaceholderText("ADMIN_TOKEN")).toBeTruthy();
+  });
+
+  it("首次初始化全流程：ADMIN_TOKEN 建管理员 → lgm_ 一次性展示确认 → 直接进入已登录", async () => {
+    // 引导期 POST /admin/users（ADMIN_TOKEN 凭证）成功；建环境后 /admin/me 返回管理员。
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.includes("/admin/users") && !url.includes("/me")) {
+          return jsonResponse({ id: "u-root", name: "root", role: "administrator", management_token: "lgm_full-flow" }, 201);
+        }
+        return fetchMockFor(ADMIN_ME)(url);
+      }),
+    );
+
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "首次初始化" }));
+    fireEvent.change(screen.getByPlaceholderText("ADMIN_TOKEN"), { target: { value: "bootstrap-token" } });
+    fireEvent.click(screen.getByRole("button", { name: "创建管理员" }));
+
+    const copy = vi.fn(async () => {});
+    vi.stubGlobal("navigator", Object.create(window.navigator, { clipboard: { value: { writeText: copy } } }));
+    fireEvent.click(await screen.findByRole("button", { name: "复制管理 Token" }));
+    await screen.findByRole("button", { name: "已复制" });
+    fireEvent.click(screen.getByRole("button", { name: "继续" }));
+    expect((screen.getByPlaceholderText("lgm_") as HTMLInputElement).value).toBe("lgm_full-flow");
+    fireEvent.click(screen.getByRole("button", { name: "验证并登录" }));
+    expect(await screen.findByRole("button", { name: "用户与授权" })).toBeTruthy();
+    vi.unstubAllGlobals();
   });
 
   it("shows admin nav by default and switches to the personal perspective for a real-id administrator", async () => {
@@ -143,7 +240,7 @@ describe("App", () => {
     unmount();
     render(<App />);
     await waitFor(() => {
-      expect(screen.queryByText(/请先填写网关地址与管理 Token/)).toBeNull();
+      expect(screen.queryByRole("heading", { name: "开始使用 LutraGate" })).toBeNull();
     });
 
     vi.unstubAllGlobals();
@@ -190,7 +287,8 @@ describe("App", () => {
     render(<App />);
     await saveCredentials();
 
-    expect(await screen.findByText(/凭证无效/)).toBeTruthy();
+    expect(await screen.findByText(/管理 Token 无效/)).toBeTruthy();
+    expect(window.localStorage.getItem("lutragate.environments")).toBeNull();
     expect(screen.queryByRole("button", { name: "用户与授权" })).toBeNull();
 
     vi.unstubAllGlobals();
@@ -210,7 +308,7 @@ describe("App", () => {
     };
     expect(raw.environments).toHaveLength(1);
     const first = raw.environments[0]!;
-    expect(first).toMatchObject({ name: "默认", gatewayUrl: "http://localhost:8787" });
+    expect(first).toMatchObject({ name: "默认", gatewayUrl: window.location.origin });
     expect(raw.activeEnvId).toBe(first.id);
 
     // Web 路径：lgm_ 明文按环境分槽（spec 故事 14），旧单份设置键不写（不做存量迁移）。
@@ -237,8 +335,8 @@ describe("App", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     // 环境 A「家里」：管理员视图，请求打家里网关、带家里的 lgm_。
+    seedStandaloneHomeEnvironment(HOME);
     render(<App />);
-    await submitDraft(HOME, "lgm_home", "家里", "创建");
     expect(await screen.findByRole("button", { name: "用户与授权" })).toBeTruthy();
     expect(calls.some((c) => c.url.startsWith(HOME) && c.token === "lgm_home")).toBe(true);
 
@@ -293,8 +391,8 @@ describe("App", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     // 环境 A「家里」：同步 2 条进家里的库。
+    seedStandaloneHomeEnvironment(HOME);
     render(<App />);
-    await submitDraft(HOME, "lgm_home", "家里", "创建");
     await waitFor(() => {
       expect(statValue("请求量")).toBe("2");
     });
@@ -357,8 +455,8 @@ describe("App", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     // 家里的首次同步挂起（logs 请求 pending）。
+    seedStandaloneHomeEnvironment(HOME);
     render(<App />);
-    await submitDraft(HOME, "lgm_home", "家里", "创建");
     await waitFor(() => {
       expect(releaseHomeLogs).not.toBeNull();
     });
@@ -405,8 +503,8 @@ describe("App", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     // 家里（1 条）+ 公司（2 条），公司为活跃。
+    seedStandaloneHomeEnvironment(HOME);
     render(<App />);
-    await submitDraft(HOME, "lgm_home", "家里", "创建");
     await waitFor(() => {
       expect(statValue("请求量")).toBe("1");
     });
@@ -488,8 +586,8 @@ describe("App", () => {
   it("deleting the last environment returns to the bootstrap flow with everything wiped (multi-env 04)", async () => {
     vi.stubGlobal("fetch", fetchMockFor(ADMIN_ME));
 
+    seedStandaloneHomeEnvironment("http://localhost:18787");
     render(<App />);
-    await submitDraft("http://localhost:18787", "lgm_home", "家里", "创建");
     await screen.findByRole("button", { name: "Key 管理" });
     const envId = (JSON.parse(window.localStorage.getItem("lutragate.environments")!) as {
       environments: Array<{ id: string }>;
@@ -502,8 +600,7 @@ describe("App", () => {
 
     // 空态 = 回到首启引导；设置与凭证分槽全空。
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "创建" })).toBeTruthy();
-      expect(screen.getByText(/请先填写网关地址与管理 Token/)).toBeTruthy();
+      expect(screen.getByRole("heading", { name: "登录网关" })).toBeTruthy();
     });
     expect(JSON.parse(window.localStorage.getItem("lutragate.environments")!)).toEqual({
       environments: [],
@@ -524,8 +621,8 @@ describe("App", () => {
   it("renames/re-points the active environment without losing id, credentials, or the active marker (multi-env 02)", async () => {
     vi.stubGlobal("fetch", fetchMockFor(ADMIN_ME));
 
+    seedStandaloneHomeEnvironment("http://localhost:18787");
     render(<App />);
-    await submitDraft("http://localhost:18787", "lgm_home", "家里", "创建");
     await screen.findByRole("button", { name: "Key 管理" });
 
     // 环境设置页改名 + 改地址（id 与凭证不动）；保存反馈走全局 toast。

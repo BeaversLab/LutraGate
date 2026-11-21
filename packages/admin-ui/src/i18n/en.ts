@@ -2,6 +2,7 @@
 export const en = {
   app: {
     title: "LutraGate Admin",
+    hintConnectCurrent: "Enter the management token for this gateway.",
     hintConfigure:
       "Enter the gateway URL and management token first (e.g. a local gateway at http://localhost:8787).",
     credentialInvalid:
@@ -54,6 +55,7 @@ export const en = {
     neverSynced: "Local logs not synced yet",
   },
   toast: {
+    connectionSaved: "Connection settings saved",
     envSaved: "Environment settings saved",
     envCreated: 'Created and switched to "{{name}}"',
     envDeleted: 'Deleted environment "{{name}}"',
@@ -143,6 +145,10 @@ export const en = {
       connectivity: "Connectivity test",
     },
     form: {
+      pendingVerification: "Preset live test pending",
+      verifiedPreset: "Preset live tested",
+      officialDocs: "Official API documentation",
+      presetDocsAria: "{{name}} official API documentation",
       type: "Provider type",
       custom: "Custom / compatible endpoint",
       name: "Name",
@@ -167,6 +173,7 @@ export const en = {
     },
   },
   settings: {
+    connectionTitle: "Connection settings",
     pageTitle: "Environment Settings",
     secretDegraded:
       "OS secure storage is unavailable; the management token is stored in plaintext as a fallback.",
@@ -187,6 +194,34 @@ export const en = {
     frontendVersion: "Embedded UI: v{{version}}",
     desktopVersion: "Desktop features: v{{version}}",
     versionUnknown: "unknown",
+  },
+  bootstrap: {
+    entry: "First-time setup",
+    adminToken: "Setup token (ADMIN_TOKEN)",
+    name: "Administrator username",
+    submit: "Create administrator",
+    progress: "Setup progress",
+    existing: "I have a management token",
+    existingHint: "Connect to a deployed gateway using the token from your administrator.",
+    newHint: "Set up the first administrator on a newly deployed gateway.",
+    back: "Back",
+    next: "Continue",
+    signIn: "Verify and sign in",
+    working: "Working…",
+    copy: "Copy management token",
+    copied: "Copied",
+    copyError: "Could not write to the clipboard. Check clipboard permissions and try again.",
+    addressError: "Enter a full gateway address starting with http:// or https://.",
+    credentialError: "Invalid management token. Check the token and try again.",
+    steps: { choose: "Setup type", address: "Gateway address", create: "Administrator", copy: "Save token", login: "Sign in" },
+    titles: { choose: "Set up LutraGate", address: "Connect to your gateway", create: "Create the first administrator", copy: "Save your management token", login: "Sign in to your gateway" },
+    descriptions: {
+      choose: "Choose the option that matches the state of your gateway.",
+      address: "Enter the address you use to reach your LutraGate Server.",
+      create: "Enter the ADMIN_TOKEN you set during deployment to create an administrator account.",
+      copy: "This is the only time the token is shown in full. Copy it and keep it somewhere safe before continuing.",
+      login: "Confirm the gateway address and management token to sign in.",
+    },
   },
   keys: {
     title: "Upstream Keys",
@@ -797,6 +832,7 @@ export const en = {
     unknownError: "Unknown error",
     runOne: "Start test",
     runAll: "Test all {{count}} endpoints",
+    modelPh: "Enter an upstream model ID",
     modelCandidates: "Model candidates",
     sourceUpstream: "{{count}} candidates (from upstream model list)",
     sourcePreset: "Candidates from the preset list (upstream list unavailable)",

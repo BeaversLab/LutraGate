@@ -1,5 +1,5 @@
 import type { Fetcher } from "../ports";
-import { chatCompletionsUrl, type Protocol } from "@lutragate/shared";
+import { chatCompletionsUrl, responsesUrl, type Protocol } from "@lutragate/shared";
 
 /**
  * Key 级连通性测试（ticket 12 后续增强）：服务端解密 Key 后直接向供应商
@@ -35,7 +35,7 @@ export async function runKeyTest(
   const url =
     protocol === "anthropic" ? `${root}/v1/messages`
     : protocol === "gemini" ? `${root}/v1beta/models/${input.model}:generateContent`
-    : protocol === "responses" ? `${root}/v1/responses`
+    : protocol === "responses" ? responsesUrl(root)
     : chatCompletionsUrl(input.baseUrl);
   const startedAt = Date.now();
   const controller = new AbortController();
@@ -50,11 +50,14 @@ export async function runKeyTest(
     } else {
       headers.authorization = `Bearer ${input.apiKey}`;
     }
+    const chatTokenLimit = protocol === "openai" && new URL(url).hostname === "api.openai.com"
+      ? { max_completion_tokens: 64 }
+      : { max_tokens: 1 };
     const bodyByProtocol: Record<string, unknown> = {
-      openai: { model: input.model, messages: [{ role: "user", content: "ping" }], max_tokens: 1, stream: false },
+      openai: { model: input.model, messages: [{ role: "user", content: "ping" }], ...chatTokenLimit, stream: false },
       anthropic: { model: input.model, messages: [{ role: "user", content: "ping" }], max_tokens: 1, stream: false },
       gemini: { contents: [{ role: "user", parts: [{ text: "ping" }] }] },
-      responses: { model: input.model, input: "ping", max_output_tokens: 16 },
+      responses: { model: input.model, input: "Reply with just OK." },
     };
     const resp = await fetcher.fetch(
       new Request(url, {

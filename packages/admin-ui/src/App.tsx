@@ -4,6 +4,7 @@ import { AdminApi, ApiError, type Identity } from "./lib/api";
 import { toErrorMessage } from "./lib/error";
 import {
   activeEnvOf,
+  defaultGatewayUrl,
   deleteEnvTokenEverywhere,
   emptyEnvState,
   loadEnvState,
@@ -21,7 +22,9 @@ import {
   type EnvStoreState,
 } from "./lib/envs";
 import { detectSecretStore } from "./lib/secrets";
+import { detectTauriInternals } from "./lib/tauri";
 import { SettingsBar, type SettingsDraft } from "./components/SettingsBar";
+import { BootstrapPanel } from "./components/BootstrapPanel";
 import { ProvidersPanel } from "./components/ProvidersPanel";
 import { KeysPanel } from "./components/KeysPanel";
 import { MappingsPanel } from "./components/MappingsPanel";
@@ -90,18 +93,24 @@ const TAB_ICONS: Record<Page, LucideIcon> = {
 
 export function App() {
   const { t } = useTranslation();
+  const desktopShell = useMemo(() => detectTauriInternals() !== null, []);
+  const fixedGatewayUrl = !desktopShell && import.meta.env.VITE_LUTRAGATE_STANDALONE_WEB !== "true"
+    ? defaultGatewayUrl() || undefined
+    : undefined;
   // 多环境模型（multi-env 01）：具名环境列表 + 活跃环境；tracer bullet 阶段 UI 只呈现单环境。
   const [envState, setEnvState] = useState<EnvStoreState>(emptyEnvState);
-  // 活跃环境的 lgm_（引导期也可暂存 ADMIN_TOKEN）：Web=localStorage 明文分槽；桌面=Keychain 分槽。
+  // 活跃环境的 lgm_：Web=localStorage 明文分槽；桌面=Keychain 分槽。首次初始化
+  // 引导（builtin-web 03）的 ADMIN_TOKEN 只在引导调用内瞬态使用，不落任何槽。
   const [activeToken, setActiveToken] = useState("");
   // 登录身份（multi-user 06）：活跃环境变更时取 /admin/me，按角色渲染视图。
   const [identity, setIdentity] = useState<Identity | null>(null);
+  const firstLogin = useRef<{ envId: string; identity: Identity } | null>(null);
   const [credentialInvalid, setCredentialInvalid] = useState(false);
   const [meError, setMeError] = useState<string | null>(null);
   // 运行时探测 Tauri：桌面 = lgm_ 走 SecretStore（Keychain）；Web = null，行为零变化（desktop 01）。
   const secretStore = useMemo(() => detectSecretStore(), []);
   const [secretDegraded, setSecretDegraded] = useState(false);
-  const activeEnv = activeEnvOf(envState);
+  const activeEnv = activeEnvOf(envState, fixedGatewayUrl);
   const activeEnvId = activeEnv?.id ?? null;
   // 当前活跃 env id 的同步镜像：异步 token 加载的竞态守卫（multi-env 04）——
   // 加载期间环境被切换/删除时，旧环境的 lgm_ 不得复活打到新网关（spec 故事 12）。
@@ -132,10 +141,10 @@ export function App() {
   useEffect(() => {
     const state = loadEnvState(window.localStorage);
     setEnvState(state);
-    const env = activeEnvOf(state);
+    const env = activeEnvOf(state, fixedGatewayUrl);
     if (env === null) return;
     activateEnvToken(env.id);
-  }, [activateEnvToken]);
+  }, [activateEnvToken, fixedGatewayUrl]);
 
   // 本地日志镜像按 env id 分库（multi-env 01/03）：桌面 = SQLite 私库
   // lutragate-<id>.db（永久保留），Web = Dexie lutragate-<id>。
@@ -184,33 +193,36 @@ export function App() {
       // 编辑活跃环境：改名/改地址（id 不变，数据与凭证不丢）。
       const nextEnv: EnvRecord = {
         ...activeEnv,
-        name: envName(draft.name),
-        gatewayUrl: normalizeBaseUrl(draft.gatewayUrl),
+        name: fixedGatewayUrl === undefined ? envName(draft.name) : activeEnv.name,
+        gatewayUrl: fixedGatewayUrl ?? normalizeBaseUrl(draft.gatewayUrl),
       };
       const next = upsertEnv(envState, nextEnv);
       saveEnvState(window.localStorage, next);
       setEnvState(next);
       persistEnvToken(nextEnv.id, draft.managementToken);
-      showToast(t("toast.envSaved"));
+      showToast(t(fixedGatewayUrl === undefined ? "toast.envSaved" : "toast.connectionSaved"));
     },
-    [activeEnv, envState, persistEnvToken],
+    [activeEnv, envState, fixedGatewayUrl, persistEnvToken],
   );
 
   /** 新建环境并切换过去（spec 故事 2）：登记即活跃，原环境凭证保留不动。 */
   const onCreateEnv = useCallback(
-    (draft: SettingsDraft) => {
+    (draft: SettingsDraft, verifiedIdentity?: Identity) => {
       const env: EnvRecord = {
         id: newEnvId(),
         name: envName(draft.name),
-        gatewayUrl: normalizeBaseUrl(draft.gatewayUrl),
+        gatewayUrl: fixedGatewayUrl ?? normalizeBaseUrl(draft.gatewayUrl),
       };
       const next = setActiveEnv(upsertEnv(envState, env), env.id);
       saveEnvState(window.localStorage, next);
+      if (verifiedIdentity) firstLogin.current = { envId: env.id, identity: verifiedIdentity };
       setEnvState(next);
       persistEnvToken(env.id, draft.managementToken);
-      showToast(t("toast.envCreated", { name: env.name }));
+      showToast(fixedGatewayUrl === undefined
+        ? t("toast.envCreated", { name: env.name })
+        : t("toast.connectionSaved"));
     },
-    [envState, persistEnvToken],
+    [envState, fixedGatewayUrl, persistEnvToken],
   );
 
   /** 一键切换：活跃标记 + 目标环境的 lgm_ 分槽（Web=localStorage；桌面=Keychain 异步）。
@@ -270,7 +282,7 @@ export function App() {
   // 也不会出现「重置 effect 晚于用户导航触发、把页面打回默认」的竞态。
 
   const configured = activeEnv !== null && activeEnv.gatewayUrl.length > 0 && activeToken.length > 0;
-  const gatewayUrl = activeEnv?.gatewayUrl ?? "";
+  const gatewayUrl = fixedGatewayUrl ?? activeEnv?.gatewayUrl ?? "";
   // Memoized: a fresh instance per render would re-trigger every panel's effect.
   // 活跃环境变更（地址/token）→ 重建 AdminApi 并重取身份（spec「App 汇聚点改造」）。
   const api = useMemo(
@@ -282,16 +294,26 @@ export function App() {
     if (api === null) return;
     setCredentialInvalid(false);
     setMeError(null);
+    if (firstLogin.current?.envId === activeEnvId) {
+      setIdentity(firstLogin.current.identity);
+      firstLogin.current = null;
+      return;
+    }
     setIdentity(null);
+    let cancelled = false;
     api
       .getMe()
-      .then(setIdentity)
+      .then((verified) => {
+        if (!cancelled) setIdentity(verified);
+      })
       .catch((err: unknown) => {
+        if (cancelled) return;
         // 401 = 凭证无效（spec）；其他失败（网络/5xx）给出可重试的错误提示。
         if (err instanceof ApiError && err.status === 401) setCredentialInvalid(true);
         else setMeError(toErrorMessage(err));
       });
-  }, [api]);
+    return () => { cancelled = true; };
+  }, [api, activeEnvId]);
 
 
   return (
@@ -311,38 +333,44 @@ export function App() {
       </header>
 
       {/* key：切换环境 = 壳层 UI 上下文（页面/视角）整体重置（spec）。 */}
-      <ShellBody
-        key={activeEnvId ?? "none"}
-        identity={identity}
-        configured={configured}
-        credentialInvalid={credentialInvalid}
-        meError={meError}
-        api={api}
-        db={db}
-        gatewayUrl={gatewayUrl}
-        environments={envState.environments}
-        activeEnvId={activeEnvId}
-        onSwitchEnv={onSwitchEnv}
-        settingsBar={
-          // key：异步 Keychain 加载完成后重挂载，输入框回填活跃环境已加载的设置（桌面路径）。
-          <SettingsBar
-            key={`${activeEnvId ?? "bootstrap"}|${activeToken.length}`}
-            environments={envState.environments}
-            activeEnvId={activeEnvId}
-            initial={{
-              name: activeEnv?.name ?? "",
-              gatewayUrl,
-              managementToken: activeToken,
-            }}
-            onSave={onSaveSettings}
-            onCreate={onCreateEnv}
-            onSwitch={onSwitchEnv}
-            onDelete={onDeleteEnv}
-            secretDegraded={secretDegraded}
-            api={api}
-          />
-        }
-      />
+      {activeEnv === null ? (
+        <BootstrapPanel desktop={desktopShell} secretDegraded={secretDegraded} onDone={onCreateEnv} />
+      ) : (
+        <ShellBody
+          key={activeEnvId ?? "none"}
+          identity={identity}
+          configured={configured}
+          credentialInvalid={credentialInvalid}
+          meError={meError}
+          api={api}
+          db={db}
+          gatewayUrl={gatewayUrl}
+          environments={envState.environments}
+          fixedGateway={fixedGatewayUrl !== undefined}
+          activeEnvId={activeEnvId}
+          onSwitchEnv={onSwitchEnv}
+          settingsBar={
+            // key：异步 Keychain 加载完成后重挂载，输入框回填活跃环境已加载的设置（桌面路径）。
+            <SettingsBar
+              key={`${activeEnvId ?? "bootstrap"}|${activeToken.length}`}
+              environments={envState.environments}
+              fixedGatewayUrl={fixedGatewayUrl}
+              activeEnvId={activeEnvId}
+              initial={{
+                name: activeEnv?.name ?? "",
+                gatewayUrl,
+                managementToken: activeToken,
+              }}
+              onSave={onSaveSettings}
+              onCreate={onCreateEnv}
+              onSwitch={onSwitchEnv}
+              onDelete={onDeleteEnv}
+              secretDegraded={secretDegraded}
+              api={api}
+            />
+          }
+        />
+      )}
 
       {/* 页内二次确认弹窗（桌面联验修复）：删除环境等破坏性操作的确认载体。 */}
       {confirmDialog}
@@ -367,6 +395,7 @@ function ShellBody({
   db,
   gatewayUrl,
   environments,
+  fixedGateway,
   activeEnvId,
   onSwitchEnv,
   settingsBar,
@@ -379,11 +408,13 @@ function ShellBody({
   db: LogStore | null;
   gatewayUrl: string;
   environments: Array<{ id: string; name: string }>;
+  fixedGateway: boolean;
   activeEnvId: string | null;
   onSwitchEnv: (envId: string) => void;
   settingsBar: React.ReactNode;
 }) {
   const { t } = useTranslation();
+  const settingsTitle = t(fixedGateway ? "settings.connectionTitle" : "settings.pageTitle");
   const pageFromHash = (): Page => window.location.hash === "#/my-usage-analysis" ? "my-usage-analysis" : window.location.hash === "#/my-overview" ? "my-overview" : window.location.hash === "#/usage-analysis" ? "usage-analysis" : "overview";
   const [activePage, updateActivePage] = useState<Page>(pageFromHash);
   const [analysisContext, setAnalysisContext] = useState<UsageAnalysisContext | undefined>();
@@ -422,7 +453,7 @@ function ShellBody({
       <aside className="sidebar">
         {/* 环境下拉一键切换（UI 2.0 #11）：语义与设置页 chips 相同——切活跃
             标记 + 分槽凭证加载，切换不删除任何数据。 */}
-        {environments.length > 0 && (
+        {!fixedGateway && environments.length > 0 && (
           <EnvSelect
             environments={environments}
             activeEnvId={activeEnvId}
@@ -481,7 +512,7 @@ function ShellBody({
           onClick={() => setActivePage("settings")}
         >
           <Settings className="nav-ico" size={16} aria-hidden="true" />
-          {t("shell.settingsEntry")}
+          {fixedGateway ? settingsTitle : t("shell.settingsEntry")}
         </button>
       </aside>
 
@@ -489,13 +520,13 @@ function ShellBody({
         <div className="main-content">
         {!configured ? (
           <section className="panel-card">
-            <h2>{t("settings.pageTitle")}</h2>
-            <p className="hint">{t("app.hintConfigure")}</p>
+            <h2>{settingsTitle}</h2>
+            <p className="hint">{t(fixedGateway ? "app.hintConnectCurrent" : "app.hintConfigure")}</p>
             {settingsBar}
           </section>
         ) : credentialInvalid ? (
           <section className="panel-card">
-            <h2>{t("settings.pageTitle")}</h2>
+            <h2>{settingsTitle}</h2>
             <p className="error" role="alert">{t("app.credentialInvalid")}</p>
             {settingsBar}
           </section>
@@ -505,7 +536,7 @@ function ShellBody({
           <p className="hint">{t("app.verifying")}</p>
         ) : activePageOrFallback === "settings" ? (
           <section className="panel-card">
-            <h2>{t("settings.pageTitle")}</h2>
+            <h2>{settingsTitle}</h2>
             {settingsBar}
           </section>
         ) : (

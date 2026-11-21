@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Provider, ProviderKey } from "@lutragate/shared";
 import type { SelectedChannel } from "@lutragate/core";
-import { buildAnthropicRequest, buildUpstreamRequest, forwardBuffered, forwardStreamed, InvalidBodyError, parseChatBody } from "./proxy";
+import { buildAnthropicRequest, buildResponsesRequest, buildUpstreamRequest, forwardBuffered, forwardStreamed, InvalidBodyError, parseChatBody } from "./proxy";
 
 const T0 = 1_731_024_000_000;
 const PID = "V1StGXR8_Z5jdHi6B-myA";
@@ -140,4 +140,15 @@ describe("buildAnthropicRequest query passthrough (upstream-request-diff)", () =
     expect(new URL(req.url).search).toBe("");
     expect(req.url).toBe("https://a.test/v1/messages");
   });
+});
+
+it("forwards Qianfan Responses to v2 with the upstream model and credentials", async () => {
+  const selected = { ...channel, provider: {
+    ...channel.provider, endpoints: { responses: "https://qianfan.baidubce.com/v2" },
+  } };
+  const request = buildResponsesRequest(selected, { model: "alias", input: "ping", stream: true },
+    new Headers({ authorization: "Bearer gateway-key" }), "qianfan-key");
+  expect(request.url).toBe("https://qianfan.baidubce.com/v2/responses");
+  expect(request.headers.get("authorization")).toBe("Bearer qianfan-key");
+  expect(await request.json()).toEqual({ model: channel.upstream_model, input: "ping", stream: true });
 });

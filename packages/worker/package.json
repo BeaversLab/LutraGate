@@ -6,7 +6,7 @@
   "description": "Cloudflare Workers adapter for LutraGate",
   "scripts": {
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
+    "deploy": "pnpm --filter @lutragate/admin-ui run build && wrangler deploy",
     "build": "tsc -p tsconfig.json --noEmit",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run"
