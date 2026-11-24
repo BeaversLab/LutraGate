@@ -948,3 +948,64 @@ input[type="checkbox"].switch:focus-visible { outline: 2px solid var(--primary);
   font-weight: 400;
   pointer-events: none;
 }
+
+/* 菜单栏面板（menu-bar-usage 03）：第二个无边框 Webview 的紧凑用量视图。 */
+.menu-bar-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  height: 100vh;
+  padding: 10px 12px;
+  overflow-y: auto;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 13px;
+}
+.menu-bar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  position: sticky;
+  top: 0;
+  padding-bottom: 6px;
+  background: var(--bg);
+}
+.menu-bar-env { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.menu-bar-refresh, .menu-bar-badge {
+  border: 1px solid var(--input-border);
+  border-radius: 6px;
+  background: var(--card-strong);
+  color: var(--text);
+  padding: 2px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.menu-bar-badge { border-color: var(--danger); color: var(--danger); cursor: default; }
+.menu-bar-list { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.menu-bar-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+  border: 1px solid var(--input-border);
+  border-radius: 8px;
+  background: var(--card);
+}
+.menu-bar-row.exceeded { border-color: var(--danger); }
+.menu-bar-row-head { display: flex; align-items: baseline; gap: 6px; }
+.menu-bar-row-head strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.menu-bar-row-head .hint { margin-inline-start: auto; font-size: 11px; }
+.menu-bar-usage { display: flex; align-items: center; gap: 6px; font-variant-numeric: tabular-nums; }
+.menu-bar-usage-label { width: 44px; color: var(--muted); font-size: 12px; flex: none; }
+.menu-bar-usage-value { font-size: 11px; color: var(--muted); white-space: nowrap; flex: none; }
+.menu-bar-scopes { display: inline-flex; margin-inline-start: auto; border: 1px solid var(--input-border); border-radius: 6px; overflow: hidden; }
+.menu-bar-scopes button { border: 0; background: transparent; color: var(--muted); padding: 2px 8px; font-size: 12px; cursor: pointer; }
+.menu-bar-scopes button[aria-pressed="true"] { background: var(--primary); color: #fff; }
+.menu-bar-groups { display: flex; flex-direction: column; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.menu-bar-group h3 { margin: 0 0 4px; font-size: 11px; font-weight: 600; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.menu-bar-upstream { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+.menu-bar-upstream h3 { margin: 0; font-size: 11px; font-weight: 600; color: var(--muted); }
+.menu-bar-upstream-row { display: flex; flex-direction: column; gap: 4px; padding: 8px; border: 1px solid var(--input-border); border-radius: 8px; background: var(--card); }
+.menu-bar-state { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+.menu-bar-action { border: 1px solid var(--input-border); border-radius: 6px; background: var(--card-strong); color: var(--text); padding: 3px 10px; font-size: 12px; cursor: pointer; }

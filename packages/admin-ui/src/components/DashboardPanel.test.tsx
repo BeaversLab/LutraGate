@@ -178,7 +178,13 @@ describe("DashboardPanel", () => {
     await db.open();
 
     render(<DashboardPanel api={api} db={db} />);
-    // 默认 7d 档：两条都在窗口内。
+    // 默认 24h 档：只剩 recent（old 在 3 天前，窗外）。
+    await waitFor(() => {
+      expect(screen.getByText("请求量").parentElement!.textContent).toMatch(/\b1\b/);
+    });
+
+    // 切 7 天档：两条都回来。
+    fireEvent.click(screen.getByRole("button", { name: "近 7 天" }));
     await waitFor(() => {
       expect(screen.getByText("请求量").parentElement!.textContent).toMatch(/\b2\b/);
     });

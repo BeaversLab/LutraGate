@@ -18,6 +18,7 @@ import migration9Sql from "../migrations/0009_management_credentials.sql?raw";
 import migration10Sql from "../migrations/0010_credentials_to_key.sql?raw";
 import migration11Sql from "../migrations/0011_log_key_index.sql?raw";
 import migration12Sql from "../migrations/0012_log_error_message.sql?raw";
+import migration13Sql from "../migrations/0013_log_cached_tokens.sql?raw";
 
 const TEST_ENCRYPTION_KEY = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
 const PLAINTEXT_KEY = "sk-live-plaintext-secret";
@@ -143,7 +144,7 @@ async function logs(): Promise<Array<Record<string, unknown>>> {
 }
 
 beforeAll(async () => {
-  const statements = [migrationSql, migration2Sql, migration3Sql, migration4Sql, migration5Sql, migration6Sql, migration7Sql, migration8Sql, migration9Sql, migration10Sql, migration11Sql, migration12Sql].join(";").split(";").map((s) => s.trim()).filter(Boolean);
+  const statements = [migrationSql, migration2Sql, migration3Sql, migration4Sql, migration5Sql, migration6Sql, migration7Sql, migration8Sql, migration9Sql, migration10Sql, migration11Sql, migration12Sql, migration13Sql].join(";").split(";").map((s) => s.trim()).filter(Boolean);
   await db().batch(statements.map((s) => db().prepare(s)));
 });
 
@@ -192,6 +193,60 @@ describe("usage helpers", () => {
     const broken = new SseUsageScanner();
     broken.push("data: {not json\n\ndata: [DONE]\n\n");
     expect(broken.usage()).toBeUndefined();
+  });
+
+  it("extracts cache-hit tokens and merges them into prompt_tokens per provider shape", () => {
+    // Anthropic：input_tokens 不含缓存读写 → 并回总量；命中另列。
+    expect(
+      extractUsage({
+        usage: {
+          input_tokens: 4,
+          output_tokens: 96,
+          cache_read_input_tokens: 2048,
+          cache_creation_input_tokens: 100,
+        },
+      }),
+    ).toEqual({ prompt_tokens: 2152, completion_tokens: 96, cached_tokens: 2048 });
+
+    // OpenAI：prompt_tokens 本就含 cached_tokens 子集 → 不重复相加。
+    expect(
+      extractUsage({
+        usage: { prompt_tokens: 100, completion_tokens: 5, prompt_tokens_details: { cached_tokens: 80 } },
+      }),
+    ).toEqual({ prompt_tokens: 100, completion_tokens: 5, cached_tokens: 80 });
+
+    // Gemini：promptTokenCount 本就含 cachedContentTokenCount → 不重复相加。
+    expect(
+      extractUsage({
+        usage: { promptTokenCount: 50, candidatesTokenCount: 8, cachedContentTokenCount: 30 },
+      }),
+    ).toEqual({ prompt_tokens: 50, completion_tokens: 8, cached_tokens: 30 });
+
+    // 无缓存字段 → cached_tokens 缺省。
+    expect(extractUsage({ usage: { prompt_tokens: 1, completion_tokens: 2 } })).toEqual({
+      prompt_tokens: 1,
+      completion_tokens: 2,
+    });
+  });
+
+  it("merges Anthropic streaming usage (message_start cache + message_delta output)", () => {
+    const scanner = new SseUsageScanner();
+    scanner.push(
+      'data: {"type":"message_start","message":{"usage":{"input_tokens":4,"cache_read_input_tokens":2048,"cache_creation_input_tokens":100}}}\n\n',
+    );
+    scanner.push('data: {"type":"message_delta","usage":{"output_tokens":96}}\n\ndata: [DONE]\n\n');
+    expect(scanner.usage()).toEqual({ prompt_tokens: 2152, cached_tokens: 2048, completion_tokens: 96 });
+  });
+
+  it("merges Zhipu anthropic-compat stream (input tokens live in message_delta, message_start is hardcoded 0)", () => {
+    const scanner = new SseUsageScanner();
+    scanner.push(
+      'data: {"type":"message_start","message":{"usage":{"input_tokens":0,"output_tokens":0}}}\n\n',
+    );
+    scanner.push(
+      'data: {"type":"message_delta","usage":{"input_tokens":13,"output_tokens":16,"cache_read_input_tokens":0}}\n\ndata: [DONE]\n\n',
+    );
+    expect(scanner.usage()).toEqual({ prompt_tokens: 13, cached_tokens: 0, completion_tokens: 16 });
   });
 });
 

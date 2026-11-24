@@ -8,13 +8,6 @@
 import type { UsageRow } from "./api";
 import { i18n } from "../i18n";
 
-/** 本地时区今日午夜（epoch ms）——「当日用量」查询窗口起点。 */
-export function localMidnight(now = Date.now()): number {
-  const d = new Date(now);
-  d.setHours(0, 0, 0, 0);
-  return d.getTime();
-}
-
 /** 限额数字展示：0 → 「不限」（UI 2.0 #15 起经 i18n；测试环境固定 zh）。 */
 export function formatLimit(limit: number): string {
   return limit > 0 ? limit.toLocaleString() : i18n.t("quota.unlimited");

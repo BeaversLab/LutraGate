@@ -2,10 +2,10 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { PROVIDER_USAGE_TYPES } from "@lutragate/core";
 import type { AccessKeyRow, AdminApi, GrantRow, Identity, LogRow, UsageRow } from "../lib/api";
-import { effectiveWindow, filterLogs, isSuccessful, type TimeRange } from "../lib/aggregate";
+import { effectiveWindow, filterLogs, isSuccessful, loadTimeRangePref, saveTimeRangePref, type TimeRange } from "../lib/aggregate";
 import type { LogStore } from "../lib/logstore";
 import { exportCsv } from "../lib/csv";
-import { formatRemaining, indexUsageByKey, localMidnight, remaining, usageTokens } from "../lib/quota";
+import { formatRemaining, indexUsageByKey, remaining, usageTokens } from "../lib/quota";
 import { formatClock } from "../lib/format";
 import { toErrorMessage } from "../lib/error";
 import { credentialStatus, formatLastUsed } from "../lib/access-control";
@@ -37,9 +37,14 @@ export function MyDashboardPanel({ api, db, identity }: { api: AdminApi; db: Log
   const [todayBy, setTodayBy] = useState<Map<string, UsageRow>>(new Map());
   const [error, setError] = useState<string | null>(null);
   const [logs, setLogs] = useState<LogRow[]>([]);
-  const [range, setRange] = useState<TimeRange>("7d");
+  const [range, setRange] = useState<TimeRange>(() => loadTimeRangePref(window.localStorage));
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
+  /** 切档即记忆（跨会话）；custom 还原不了不落盘。 */
+  const changeRange = (r: TimeRange) => {
+    setRange(r);
+    saveTimeRangePref(window.localStorage, r);
+  };
 
   // administrator 的自助视图钉在自己的 user 上（服务端对 admin 返回全局）。
   const selfUserId = identity?.role === "administrator" ? identity.id : null;
@@ -48,15 +53,15 @@ export function MyDashboardPanel({ api, db, identity }: { api: AdminApi; db: Log
     try {
       const scope = selfUserId ? { user_id: selfUserId } : {};
       // 聚合口径跟随时间窗（与趋势图/导出一致；「全部」档不传 from/to）。
-      // 当日窗口仅用于余量列，恒为本地午夜起。
+      // 当日窗口仅用于余量列，由服务端按网关时区算（today=1，ADR-0005）。
       const { from, to } = effectiveWindow(range, customFrom, customTo, Date.now());
       const [ungrouped, keyRows, modelRows, accessKeys, todayRows] = await Promise.all([
         api.getUsage({ ...scope, from, to }),
         api.getUsage({ group_by: "key", ...scope, from, to }),
         api.getUsage({ group_by: "model", ...scope, from, to }),
         api.listAccessKeys(),
-        // 余量列的「已用」取当日（本地午夜起）聚合。
-        api.getUsage({ group_by: "key", from: localMidnight(), ...scope }),
+        // 余量列的「已用」取当日（today=1，服务端定义窗口起点）聚合。
+        api.getUsage({ group_by: "key", today: true, ...scope }),
       ]);
       setTotal(ungrouped.usage[0] ?? null);
       setByKey(keyRows.usage);
@@ -201,7 +206,7 @@ export function MyDashboardPanel({ api, db, identity }: { api: AdminApi; db: Log
           range={range}
           customFrom={customFrom}
           customTo={customTo}
-          onRangeChange={setRange}
+          onRangeChange={changeRange}
           onCustomChange={(f, t) => {
             setCustomFrom(f);
             setCustomTo(t);

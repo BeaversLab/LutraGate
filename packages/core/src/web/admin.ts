@@ -18,6 +18,7 @@ import { jsonError } from "./http";
 import { newId } from "./id";
 import { generateAccessKey, generateManagementToken, sha256Hex, tokenHint } from "./tokens";
 import { adminAuth, adminCorsGuard, corsHeaders, type AdminCredentials, type AdminDb, type AdminIdentity } from "./admin-auth";
+import { dayWindowStart } from "./quota";
 
 export type { AdminDb };
 
@@ -387,7 +388,7 @@ async function route(request: Request, deps: AdminDeps, ctx: {
       if (request.method === "GET") return listLogs(db, new URL(request.url), identity);
       return null;
     case "usage":
-      if (request.method === "GET") return usageAggregate(db, new URL(request.url), identity);
+      if (request.method === "GET") return usageAggregate(db, new URL(request.url), identity, now);
       return null;
     case "audit":
       if (request.method === "GET") return listAudit(db);
@@ -1104,13 +1105,28 @@ interface UsageAggregateRow {
  * GET /admin/usage（multi-user 05）：SQL GROUP BY 聚合请求数、错误数
  * （status ≥ 400）、prompt/completion tokens 合计与平均延迟。参数：from/to
  * （epoch ms）、access_key_id、group_by=key|model（缺省不分组）、user_id（仅
- * administrator 可用）。user 角色永远只聚合自己的行——范围在 SQL 层强制
- * （WHERE user_id = 身份），不做响应后过滤。空窗口返回零值结构而非报错。
+ * administrator 可用）、today=1（menu-bar-usage 01）。user 角色永远只聚合
+ * 自己的行——范围在 SQL 层强制（WHERE user_id = 身份），不做响应后过滤。
+ * 空窗口返回零值结构而非报错。
+ *
+ * today=1（ADR-0005）：以网关本地时区当日午夜为窗口起点——与配额账本共用
+ * dayWindowStart 与注入时钟，客户端不再自行按本地时区计算「今日」。响应额外
+ * 携带 window_start（epoch ms）；与 from/to 互斥，同传 400。不带 today 的
+ * 请求与响应形状完全不变。
  */
-async function usageAggregate(db: AdminDb, url: URL, identity: AdminIdentity): Promise<Response> {
+async function usageAggregate(db: AdminDb, url: URL, identity: AdminIdentity, clock: () => number): Promise<Response> {
   const params = url.searchParams;
   const window = epochWindow(params);
   if ("error" in window) return window.error;
+  const todayRaw = params.get("today");
+  let todayStart: number | undefined;
+  if (todayRaw !== null) {
+    if (todayRaw !== "1") return jsonError(400, "BAD_REQUEST", "today must be 1");
+    if (window.from !== undefined || window.to !== undefined) {
+      return jsonError(400, "BAD_REQUEST", "today cannot be combined with from/to");
+    }
+    todayStart = dayWindowStart(clock());
+  }
   const groupByRaw = params.get("group_by");
   let groupBy: keyof typeof USAGE_GROUP_BYS | undefined;
   if (groupByRaw !== null) {
@@ -1139,13 +1155,15 @@ async function usageAggregate(db: AdminDb, url: URL, identity: AdminIdentity): P
     conditions.push("access_key_id = ?");
     values.push(accessKeyId);
   }
-  if (window.from !== undefined) {
+  // 日窗口是 from/to 的一种特例（只定下界），统一成一个窗口对象再拼 SQL。
+  const range: { from?: number; to?: number } = todayStart === undefined ? window : { from: todayStart };
+  if (range.from !== undefined) {
     conditions.push("ts >= ?");
-    values.push(window.from);
+    values.push(range.from);
   }
-  if (window.to !== undefined) {
+  if (range.to !== undefined) {
     conditions.push("ts <= ?");
-    values.push(window.to);
+    values.push(range.to);
   }
 
   const dimColumn = groupBy === undefined ? null : USAGE_GROUP_BYS[groupBy];
@@ -1171,7 +1189,11 @@ async function usageAggregate(db: AdminDb, url: URL, identity: AdminIdentity): P
     completion_tokens: r.completion_tokens,
     avg_latency_ms: r.avg_latency_ms ?? 0,
   }));
-  return json({ group_by: groupBy ?? null, usage });
+  return json({
+    group_by: groupBy ?? null,
+    usage,
+    ...(todayStart !== undefined ? { window_start: todayStart } : {}),
+  });
 }
 
 /**

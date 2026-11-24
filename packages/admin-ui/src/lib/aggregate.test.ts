@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { LogRow } from "./api";
-import { NO_USER_KEY, aggregateLogs, bucketForWindow, byKeyTimeline, filterLogs, isSuccessful, percentile, rangeStart } from "./aggregate";
+import { NO_USER_KEY, aggregateLogs, bucketForWindow, byKeyTimeline, filterLogs, isSuccessful, loadOverviewRangePref, loadTimeRangePref, percentile, rangeStart, saveOverviewRangePref, saveTimeRangePref } from "./aggregate";
 
 let seq = 0;
 function log(partial: Partial<LogRow>): LogRow {
@@ -173,6 +173,43 @@ describe("rangeStart", () => {
     const now = 1_000_000_000;
     expect(rangeStart("24h", now)).toBe(now - 86_400_000);
     expect(rangeStart("all", now)).toBeUndefined();
+  });
+});
+
+// ---- 时间范围偏好（跨会话记忆）------------------------------------------------
+
+function storageWith(items: Record<string, string>): Pick<Storage, "getItem"> {
+  return { getItem: (k: string) => items[k] ?? null };
+}
+
+describe("时间范围偏好（loadTimeRangePref/saveTimeRangePref）", () => {
+  it("缺失/非法值回退默认 24h", () => {
+    expect(loadTimeRangePref(storageWith({}))).toBe("24h");
+    expect(loadTimeRangePref(storageWith({ "lutragate.time-range": "blue" }))).toBe("24h");
+    expect(loadTimeRangePref(storageWith({ "lutragate.time-range": "" }))).toBe("24h");
+  });
+
+  it("记忆快捷档并在下次读取时还原", () => {
+    expect(loadTimeRangePref(storageWith({ "lutragate.time-range": "30d" }))).toBe("30d");
+    expect(loadTimeRangePref(storageWith({ "lutragate.time-range": "all" }))).toBe("all");
+  });
+
+  it("custom 不落盘（from/to 没存，还原不了）", () => {
+    const store: Record<string, string> = { "lutragate.time-range": "7d" };
+    saveTimeRangePref({ setItem: (k, v) => (store[k] = v) }, "custom");
+    expect(store["lutragate.time-range"]).toBe("7d");
+    saveTimeRangePref({ setItem: (k, v) => (store[k] = v) }, "24h");
+    expect(store["lutragate.time-range"]).toBe("24h");
+  });
+});
+
+describe("概览页范围偏好（loadOverviewRangePref/saveOverviewRangePref）", () => {
+  it("缺失/非法值回退默认 24h；快捷档可还原；custom 不落盘", () => {
+    expect(loadOverviewRangePref(storageWith({}))).toBe("24h");
+    expect(loadOverviewRangePref(storageWith({ "lutragate.overview-range": "14" }))).toBe("14");
+    const store: Record<string, string> = { "lutragate.overview-range": "7" };
+    saveOverviewRangePref({ setItem: (k, v) => (store[k] = v) }, "custom");
+    expect(store["lutragate.overview-range"]).toBe("7");
   });
 });
 

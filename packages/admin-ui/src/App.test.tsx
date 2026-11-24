@@ -4,7 +4,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { App } from "./App";
 import { contractRow } from "./lib/logstore.contract";
 import { LogDb } from "./lib/logdb";
-import { loadEnvState, loadEnvToken, saveEnvState, saveEnvToken } from "./lib/envs";
+import { ENV_STATE_KEY, envTokenKey, loadEnvState, loadEnvToken, saveEnvState, saveEnvToken } from "./lib/envs";
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -95,11 +95,19 @@ describe("App", () => {
   beforeEach(() => {
     // 多环境状态落 localStorage：跨用例隔离，每个用例从零环境首启。
     window.localStorage.clear();
+    window.location.hash = "";
   });
 
   afterEach(() => {
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();
+  });
+
+  it("never activates the menu-panel surface outside the desktop shell", () => {
+    window.location.hash = "#menu-panel";
+    const { container } = render(<App />);
+    expect(container.querySelector(".menu-bar-panel")).toBeNull();
+    expect(container.querySelector(".app-shell")).not.toBeNull();
   });
 
   it("uses the current gateway's credentials even when a remote environment was active", async () => {

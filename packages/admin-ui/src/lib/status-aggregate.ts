@@ -18,7 +18,7 @@ export const DAY_MS = 86_400_000;
 
 /**
  * 个人盘状态卡「最近请求」（dash-status 02）：镜像内每把访问 key 的最近一条
- * 日志，只看 24h 窗口内（超窗视为「今日无请求」，与「今日余量」同口径）；
+ * 日志，只看滚动 24h 窗口（与网关口径的「今日余量」不是同一个窗口，勿混用）；
  * 无归属行（null）不进图。
  */
 export function lastRequestWithin24h(logs: LogRow[], now: number): Map<string, LogRow> {

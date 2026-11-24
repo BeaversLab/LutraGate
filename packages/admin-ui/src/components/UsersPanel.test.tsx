@@ -238,7 +238,10 @@ describe("UsersPanel（表格列表 + 编辑整页，UI 2.0）", () => {
     expect(dialog.textContent).toContain("创建时间");
     expect(dialog.textContent).toContain("7 请求 / 50 tokens");
     expect(dialog.textContent).not.toContain("唯一启用");
-    expect(usageCalls[0]).toContain("user_id=u2");
+    const usageParams = new URL(usageCalls[0]!).searchParams;
+    expect(usageParams.get("user_id")).toBe("u2");
+    expect(usageParams.get("today")).toBe("1");
+    expect(usageParams.has("from")).toBe(false);
     fireEvent.click(screen.getByRole("button", { name: "确认删除" }));
     await waitFor(() => expect(deletes).toEqual(["http://gw.test/admin/users/u2"]));
     await waitFor(() => expect(screen.queryByRole("region")).toBeNull()); // 删除后回落列表态

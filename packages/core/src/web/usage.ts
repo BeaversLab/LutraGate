@@ -10,6 +10,12 @@ import type { ChatRequestBody } from "./proxy";
 export interface Usage {
   prompt_tokens?: number;
   completion_tokens?: number;
+  /**
+   * 缓存命中（cache read）token 数，已含在 prompt_tokens 内，另列记录供展示：
+   * Anthropic cache_read_input_tokens / OpenAI prompt_tokens_details.cached_tokens /
+   * Gemini cachedContentTokenCount。
+   */
+  cached_tokens?: number;
 }
 
 /**
@@ -20,8 +26,13 @@ export function extractUsage(json: unknown): Usage | undefined {
   if (typeof json !== "object" || json === null) return undefined;
   const usage = (json as { usage?: unknown }).usage;
   if (typeof usage !== "object" || usage === null) return undefined;
-  const { prompt_tokens, completion_tokens, input_tokens, output_tokens, promptTokenCount, candidatesTokenCount } =
-    usage as Record<string, unknown>;
+  const u = usage as Record<string, unknown>;
+  const {
+    prompt_tokens, completion_tokens, input_tokens, output_tokens,
+    promptTokenCount, candidatesTokenCount,
+    cache_read_input_tokens, cache_creation_input_tokens, cachedContentTokenCount,
+  } = u;
+  const details = u.prompt_tokens_details as { cached_tokens?: unknown } | null | undefined;
   const result: Usage = {};
   if (typeof prompt_tokens === "number") result.prompt_tokens = prompt_tokens;
   if (typeof completion_tokens === "number") result.completion_tokens = completion_tokens;
@@ -30,6 +41,20 @@ export function extractUsage(json: unknown): Usage | undefined {
   // Gemini 的 usageMetadata 键名
   if (typeof promptTokenCount === "number") result.prompt_tokens ??= promptTokenCount;
   if (typeof candidatesTokenCount === "number") result.completion_tokens ??= candidatesTokenCount;
+  // 缓存命中（三种键名形态，取先出现者）。
+  const cacheRead = typeof cache_read_input_tokens === "number" ? cache_read_input_tokens : undefined;
+  const openAiCached = typeof details?.cached_tokens === "number" ? details.cached_tokens : undefined;
+  const geminiCached = typeof cachedContentTokenCount === "number" ? cachedContentTokenCount : undefined;
+  const cached = cacheRead ?? openAiCached ?? geminiCached;
+  if (cached !== undefined) result.cached_tokens = cached;
+  // Anthropic 原生 input_tokens 不含缓存读写 → 并回输入总量（OpenAI/Gemini 的
+  // prompt_tokens/promptTokenCount 本就含缓存命中，再加会双计）。cache_creation
+  // 是真实输入消耗（写缓存），同样并入；但不算「命中」，不进 cached_tokens。
+  const cacheCreation =
+    typeof cache_creation_input_tokens === "number" ? cache_creation_input_tokens : undefined;
+  if ((cacheRead !== undefined || cacheCreation !== undefined) && result.prompt_tokens !== undefined) {
+    result.prompt_tokens += (cacheRead ?? 0) + (cacheCreation ?? 0);
+  }
   return result.prompt_tokens === undefined && result.completion_tokens === undefined
     ? undefined
     : result;
@@ -76,12 +101,24 @@ export class SseUsageScanner {
         if (usage?.prompt_tokens !== undefined) {
           this.found = { ...this.found, prompt_tokens: usage.prompt_tokens };
         }
+        if (usage?.cached_tokens !== undefined) {
+          this.found = { ...this.found, cached_tokens: usage.cached_tokens };
+        }
         return;
       }
       if (event.type === "message_delta") {
         const usage = extractUsage(event);
         if (usage?.completion_tokens !== undefined) {
           this.found = { ...this.found, completion_tokens: usage.completion_tokens };
+        }
+        // 智谱 Anthropic 兼容端点：message_start 的 input_tokens 写死为 0，
+        // 真实输入（含缓存字段）放在 message_delta——原生 Anthropic 的 delta
+        // 不带这些字段，有则合并无则不动。
+        if (usage?.prompt_tokens !== undefined) {
+          this.found = { ...this.found, prompt_tokens: usage.prompt_tokens };
+        }
+        if (usage?.cached_tokens !== undefined) {
+          this.found = { ...this.found, cached_tokens: usage.cached_tokens };
         }
         return;
       }

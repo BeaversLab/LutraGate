@@ -398,6 +398,7 @@ export function createGatewayHandler(deps: GatewayDeps) {
         user_id: identity.user_id,
         access_key_id: identity.access_key_id,
         prompt_tokens: fields.usage?.prompt_tokens,
+        cached_tokens: fields.usage?.cached_tokens,
         completion_tokens: fields.usage?.completion_tokens,
         latency_ms: now() - requestStartedAt,
         status: fields.status,

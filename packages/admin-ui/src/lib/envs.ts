@@ -22,9 +22,10 @@ export interface StorageLike {
   setItem(key: string, value: string): void;
 }
 
-const STATE_KEY = "lutragate.environments";
+/** 环境列表 storage 键：跨窗口跟随（storage 事件）用它识别环境切换（面板 ⇄ 主窗口）。 */
+export const ENV_STATE_KEY = "lutragate.environments";
 /** Web 路径的 lgm_ 明文分槽表（桌面降级时也落这里）；token 不进环境列表（spec）。 */
-const TOKENS_KEY = "lutragate.env-tokens";
+export const ENV_TOKENS_KEY = "lutragate.env-tokens";
 
 export function emptyEnvState(): EnvStoreState {
   return { environments: [], activeEnvId: null };
@@ -53,7 +54,7 @@ function parseEnvRecord(value: unknown): EnvRecord | null {
 
 export function loadEnvState(storage: StorageLike): EnvStoreState {
   try {
-    const raw = storage.getItem(STATE_KEY);
+    const raw = storage.getItem(ENV_STATE_KEY);
     if (raw === null) return emptyEnvState();
     const parsed = JSON.parse(raw) as { environments?: unknown; activeEnvId?: unknown };
     const environments = Array.isArray(parsed.environments)
@@ -71,7 +72,7 @@ export function loadEnvState(storage: StorageLike): EnvStoreState {
 }
 
 export function saveEnvState(storage: StorageLike, state: EnvStoreState): void {
-  storage.setItem(STATE_KEY, JSON.stringify(state));
+  storage.setItem(ENV_STATE_KEY, JSON.stringify(state));
 }
 
 /** 内置 Web 只读取当前网关的环境记录，兼容此前保存的同源连接。 */
@@ -112,7 +113,7 @@ type TokenMap = Record<string, string>;
 
 function loadTokenMap(storage: StorageLike): TokenMap {
   try {
-    const raw = storage.getItem(TOKENS_KEY);
+    const raw = storage.getItem(ENV_TOKENS_KEY);
     if (raw === null) return {};
     const parsed: unknown = JSON.parse(raw);
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
@@ -127,7 +128,7 @@ function loadTokenMap(storage: StorageLike): TokenMap {
 }
 
 function saveTokenMap(storage: StorageLike, map: TokenMap): void {
-  storage.setItem(TOKENS_KEY, JSON.stringify(map));
+  storage.setItem(ENV_TOKENS_KEY, JSON.stringify(map));
 }
 
 /** Web 路径：lgm_ 按环境分槽明文存 localStorage（Web 惯例，spec 故事 14）。 */
@@ -145,6 +146,8 @@ export function saveEnvToken(storage: StorageLike, envId: string, token: string)
 export interface SecureEnvTokenState {
   token: string;
   degraded: boolean;
+  /** 安全存储读取失败的错误信息；null = 读取正常（含「无条目」）。 */
+  readError: string | null;
 }
 
 /**
@@ -157,12 +160,18 @@ export async function loadEnvTokenSecure(
   envId: string,
 ): Promise<SecureEnvTokenState> {
   const plaintext = loadEnvToken(storage, envId);
-  const finish = (token: string, degraded: boolean): SecureEnvTokenState => ({ token, degraded });
+  const finish = (
+    token: string,
+    degraded: boolean,
+    readError: string | null = null,
+  ): SecureEnvTokenState => ({ token, degraded, readError });
   let secureToken: string | null = null;
   try {
     secureToken = await secret.get(envTokenKey(envId));
-  } catch {
-    return finish(plaintext, plaintext !== "");
+  } catch (err) {
+    // 读取失败不得静默：带回错误信息，由设置页显式提示（token 仍按明文副本降级）。
+    const readError = err instanceof Error ? err.message : String(err);
+    return finish(plaintext, plaintext !== "", readError);
   }
   if (secureToken !== null && secureToken !== "") {
     if (plaintext !== "") saveEnvToken(storage, envId, "");

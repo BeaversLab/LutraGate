@@ -34,6 +34,7 @@ export function SettingsBar({
   onSwitch,
   onDelete,
   secretDegraded = false,
+  secretReadError = null,
   api = null,
 }: {
   /** 全部已登记环境（chips 顺序即列表序）。 */
@@ -54,6 +55,8 @@ export function SettingsBar({
   onDelete: (envId: string) => void;
   /** true = OS 安全存储不可用，token 明文降级 → 常驻警告（不可关闭）。 */
   secretDegraded?: boolean;
+  /** 安全存储读取失败的错误信息（null = 读取正常）→ 显式报错。 */
+  secretReadError?: string | null;
   /** 活跃环境的 AdminApi：提供时拉取 /version 显示服务器版本信息（首启引导无 api 不显示）。 */
   api?: AdminApi | null;
 }) {
@@ -112,11 +115,17 @@ export function SettingsBar({
         else onSave(draft);
       }}
     >
-      {secretDegraded && (
+      {secretReadError !== null ? (
+        <p className="error" role="alert">
+          {t(secretDegraded ? "settings.secretReadErrorDegraded" : "settings.secretReadError", {
+            message: secretReadError,
+          })}
+        </p>
+      ) : secretDegraded ? (
         <p className="error" role="alert">
           {t("settings.secretDegraded")}
         </p>
-      )}
+      ) : null}
       {multiEnv && environments.length > 0 && (
         <div className="env-chips">
           {/* 与侧栏同一环境切换下拉（UI 2.0 统一入口）；aria 名用「切换环境」

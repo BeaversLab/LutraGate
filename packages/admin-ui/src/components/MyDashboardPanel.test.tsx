@@ -18,15 +18,9 @@ function freshDb(): LogDb {
   return new LogDb(`my-dash-${Math.random().toString(36).slice(2)}`);
 }
 
-const DAY_MS = 86_400_000;
-
-/**
- * 判别「当日余量」调用：聚合调用随时间窗（默认 7 天）也带 from，但余量调用
- * 的 from 恒为本地午夜（24h 内），7 天窗的 from 在 7 天前。
- */
-function isDailyUsageUrl(url: string): boolean {
-  const from = new URL(url).searchParams.get("from");
-  return from !== null && Number(from) > Date.now() - DAY_MS;
+/** 判别「当日余量」调用：窗口由服务端定义（today=1），客户端不再传 from。 */
+function isTodayUsageUrl(url: string): boolean {
+  return new URL(url).searchParams.get("today") === "1";
 }
 
 describe("MyDashboardPanel (multi-user)", () => {
@@ -89,6 +83,11 @@ describe("MyDashboardPanel (multi-user)", () => {
     const ungrouped = urls.filter((u) => u.includes("/admin/usage") && !u.includes("group_by"));
     expect(ungrouped.length).toBeGreaterThan(0);
     expect(ungrouped.every((u) => u.includes("from="))).toBe(true);
+    // 当日余量改用服务端窗口（today=1）：按 key 分组、不带客户端算的 from。
+    const todayCalls = urls.filter(isTodayUsageUrl);
+    expect(todayCalls.length).toBeGreaterThan(0);
+    expect(todayCalls.every((u) => u.includes("group_by=key"))).toBe(true);
+    expect(todayCalls.every((u) => !new URL(u).searchParams.has("from"))).toBe(true);
   });
 
   it("renders today's remainder column from daily usage vs key limits (quota)", async () => {
@@ -97,11 +96,14 @@ describe("MyDashboardPanel (multi-user)", () => {
       adminToken: "t",
       fetcher: async (url) => {
         if (url.includes("/admin/usage")) {
-          // 当日窗口（from=本地午夜）：ak1 今日 5 请求 / 460 tokens；其余维度给空集。
-          if (isDailyUsageUrl(url)) {
+          // 当日窗口（today=1，服务端定义起点）：ak1 今日 5 请求 / 460 tokens；其余维度给空集。
+          // window_start 刻意与客户端时区无关（1）：余量必须完全由服务端返回的
+          // usage 行决定，客户端不得按这个时间戳重算窗口。
+          if (isTodayUsageUrl(url)) {
             expect(url.includes("group_by=key")).toBe(true);
             return jsonResponse({
               group_by: "key",
+              window_start: 1,
               usage: [{ access_key_id: "ak1", requests: 5, errors: 0, prompt_tokens: 400, completion_tokens: 60, avg_latency_ms: 50 }],
             });
           }

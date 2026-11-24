@@ -169,7 +169,7 @@ describe("token slots (desktop secure)", () => {
 
     const state = await loadEnvTokenSecure(store, storage, "e1");
 
-    expect(state).toEqual({ token: "lgm_secure", degraded: false });
+    expect(state).toEqual({ token: "lgm_secure", degraded: false, readError: null });
     // 安全副本在位：localStorage 不留双份秘密。
     expect(loadEnvToken(storage, "e1")).toBe("");
     expect(peek(envTokenKey("e1"))).toBe("lgm_secure");
@@ -181,8 +181,8 @@ describe("token slots (desktop secure)", () => {
     await saveEnvTokenSecure(store, storage, "e1", "lgm_home");
     await saveEnvTokenSecure(store, storage, "e2", "lgm_work");
 
-    expect(await loadEnvTokenSecure(store, storage, "e1")).toEqual({ token: "lgm_home", degraded: false });
-    expect(await loadEnvTokenSecure(store, storage, "e2")).toEqual({ token: "lgm_work", degraded: false });
+    expect(await loadEnvTokenSecure(store, storage, "e1")).toEqual({ token: "lgm_home", degraded: false, readError: null });
+    expect(await loadEnvTokenSecure(store, storage, "e2")).toEqual({ token: "lgm_work", degraded: false, readError: null });
   });
 
   it("degrades to the plaintext copy with a persistent warning when the Keychain is unavailable", async () => {
@@ -192,12 +192,21 @@ describe("token slots (desktop secure)", () => {
 
     const state = await loadEnvTokenSecure(store, storage, "e1");
 
-    expect(state).toEqual({ token: "lgm_plain", degraded: true });
+    expect(state).toEqual({ token: "lgm_plain", degraded: true, readError: "keychain unavailable" });
+  });
+
+  it("surfaces a Keychain read failure instead of silently returning an empty token", async () => {
+    const { store } = fakeSecretStore({ failGet: true });
+
+    const state = await loadEnvTokenSecure(store, memoryStorage(), "e1");
+
+    expect(state.token).toBe("");
+    expect(state.readError).toBe("keychain unavailable");
   });
 
   it("returns an empty non-degraded state when nothing is stored anywhere", async () => {
     const { store } = fakeSecretStore();
-    expect(await loadEnvTokenSecure(store, memoryStorage(), "e1")).toEqual({ token: "", degraded: false });
+    expect(await loadEnvTokenSecure(store, memoryStorage(), "e1")).toEqual({ token: "", degraded: false, readError: null });
   });
 
   it("saves into the per-env Keychain slot and keeps localStorage secret-free", async () => {
@@ -230,7 +239,7 @@ describe("token slots (desktop secure)", () => {
 
     const state = await loadEnvTokenSecure(store, storage, "e1");
 
-    expect(state).toEqual({ token: "lgm_degraded", degraded: false });
+    expect(state).toEqual({ token: "lgm_degraded", degraded: false, readError: null });
     expect(peek(envTokenKey("e1"))).toBe("lgm_degraded");
     expect(loadEnvToken(storage, "e1")).toBe("");
   });

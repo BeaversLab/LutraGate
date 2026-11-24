@@ -126,6 +126,19 @@ describe("SettingsBar", () => {
     expect(screen.getByRole("alert").textContent).toContain("明文降级存储");
   });
 
+  it("surfaces a Keychain read failure explicitly instead of showing an empty token silently", () => {
+    renderSingle({ secretReadError: "keychain unavailable" });
+    // 显式报错：带底层原因与修复动作，而不是静默回落到空 token。
+    expect(screen.getByRole("alert").textContent).toContain("无法从系统钥匙串读取管理 Token");
+    expect(screen.getByRole("alert").textContent).toContain("keychain unavailable");
+  });
+
+  it("reports the plaintext fallback when the Keychain read fails but a plaintext copy exists", () => {
+    renderSingle({ secretReadError: "keychain unavailable", secretDegraded: true });
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
+    expect(screen.getByRole("alert").textContent).toContain("已回退到本地明文副本");
+  });
+
   it("提供 api 时显示服务器版本信息（标签 · 短 hash）；无 api（首启引导）不显示", async () => {
     // 首启引导：api 缺省 → 不渲染版本块（render 后由 auto-cleanup 卸载）。
     renderSingle();

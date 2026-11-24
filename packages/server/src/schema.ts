@@ -48,7 +48,7 @@ CREATE TABLE IF NOT EXISTS request_log (
   client_model TEXT NOT NULL, upstream_model TEXT,
   provider_id TEXT, key_id TEXT,
   user_id TEXT, access_key_id TEXT,
-  prompt_tokens INTEGER, completion_tokens INTEGER,
+  prompt_tokens INTEGER, completion_tokens INTEGER, cached_tokens INTEGER,
   latency_ms INTEGER, status INTEGER NOT NULL,
   error_type TEXT, error_message TEXT
 );
@@ -147,6 +147,13 @@ export function migrate(db: MigrateDb): void {
   // 0012 日志错误详情（打磨轮 B）：上游失败截断摘要；新库由 DDL 直接创建。
   try {
     db.exec("ALTER TABLE request_log ADD COLUMN error_message TEXT");
+  } catch {
+    // 列已存在
+  }
+  // 0013 缓存命中列（usage-cached）：命中量并入 prompt_tokens 后另列记录；
+  // 新库由 DDL 直接创建。
+  try {
+    db.exec("ALTER TABLE request_log ADD COLUMN cached_tokens INTEGER");
   } catch {
     // 列已存在
   }

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ChevronRight } from "lucide-react";
 import type { AdminApi, AccessKeyRow, GrantEntry, KeyRow, ProviderRow, UserRow } from "../lib/api";
-import { localMidnight, parseLimitInput, usageTokens } from "../lib/quota";
+import { parseLimitInput, usageTokens } from "../lib/quota";
 import { dateInputToExpiry, expiryToDateInput, formatDate, formatExpiry, formatLastUsed, parseCidrList } from "../lib/access-control";
 import { toErrorMessage } from "../lib/error";
 import { Modal } from "./Modal";
@@ -921,7 +921,7 @@ function DeleteUserModal({
   useEffect(() => {
     void (async () => {
       try {
-        const result = await api.getUsage({ from: localMidnight(), user_id: user.id });
+        const result = await api.getUsage({ today: true, user_id: user.id });
         const row = result.usage[0];
         setUsage(row ? { requests: row.requests, tokens: usageTokens(row) } : { requests: 0, tokens: 0 });
       } catch {

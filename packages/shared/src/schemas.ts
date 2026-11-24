@@ -107,6 +107,8 @@ export const RequestLogEntrySchema = z.object({
   user_id: nanoid.optional(),
   access_key_id: nanoid.optional(),
   prompt_tokens: z.number().int().nonnegative().optional(),
+  /** 缓存命中 token（cache read），已含在 prompt_tokens 内；历史行为空。 */
+  cached_tokens: z.number().int().nonnegative().optional(),
   completion_tokens: z.number().int().nonnegative().optional(),
   latency_ms: z.number().int().nonnegative().optional(),
   /** HTTP status of the upstream response (or 0 for network errors). */

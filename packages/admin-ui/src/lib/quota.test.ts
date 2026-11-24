@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatLimit, localMidnight, parseLimitInput, remaining } from "./quota";
+import { formatLimit, parseLimitInput, remaining } from "./quota";
 
 describe("quota display helpers (quota 03)", () => {
   it("formats 0 as 不限", () => {
@@ -20,13 +20,5 @@ describe("quota display helpers (quota 03)", () => {
     expect(parseLimitInput("-3")).toBe(0);
     expect(parseLimitInput("1.5")).toBe(0);
     expect(parseLimitInput("abc")).toBe(0);
-  });
-
-  it("snaps to the local-midnight window start", () => {
-    const midnight = localMidnight(new Date("2026-11-09T15:30:00").getTime());
-    expect(midnight).toBe(new Date("2026-11-09T00:00:00").getTime());
-    // 同日共享；跨日翻窗。
-    expect(localMidnight(new Date("2026-11-09T00:00:01").getTime())).toBe(midnight);
-    expect(localMidnight(new Date("2026-11-10T08:00:00").getTime())).toBe(midnight + 86_400_000);
   });
 });

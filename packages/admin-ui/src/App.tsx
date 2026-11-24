@@ -7,6 +7,8 @@ import {
   defaultGatewayUrl,
   deleteEnvTokenEverywhere,
   emptyEnvState,
+  ENV_STATE_KEY,
+  ENV_TOKENS_KEY,
   loadEnvState,
   loadEnvToken,
   loadEnvTokenSecure,
@@ -22,7 +24,10 @@ import {
   type EnvStoreState,
 } from "./lib/envs";
 import { detectSecretStore } from "./lib/secrets";
-import { detectTauriInternals } from "./lib/tauri";
+import { detectTauriInternals, safeInvoke } from "./lib/tauri";
+import { MenuBarPanel } from "./components/MenuBarPanel";
+import { MenuBarMonitor } from "./components/MenuBarMonitor";
+import { MENU_PANEL_SHOWN_EVENT, menuPanelActive } from "./lib/menu-bar";
 import { SettingsBar, type SettingsDraft } from "./components/SettingsBar";
 import { BootstrapPanel } from "./components/BootstrapPanel";
 import { ProvidersPanel } from "./components/ProvidersPanel";
@@ -92,8 +97,27 @@ const TAB_ICONS: Record<Page, LucideIcon> = {
 };
 
 export function App() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const desktopShell = useMemo(() => detectTauriInternals() !== null, []);
+  // 面板 surface 只在桌面壳内可达；Web 构建永不进入。
+  const menuSurface = useMemo(() => menuPanelActive(desktopShell), [desktopShell]);
+  // 授权未放行（未激活/检查中）时 api 保持 null → 面板与监视都不发任何数据请求。
+  // Web（无授权门）恒为 true。
+  const [licenseActive, setLicenseActive] = useState(() => !desktopShell);
+
+  // 托盘菜单文案与界面语言同步（App 顶层：授权门/检查中也会执行，锁定态不残留
+  // 中文兜底）；标题在授权未放行时清空，避免锁屏残留旧告警。
+  useEffect(() => {
+    if (!desktopShell) return;
+    safeInvoke("set_tray_menu_labels", {
+      open: t("menuBar.openApp"),
+      refresh: t("menuBar.refresh"),
+      quit: t("menuBar.quit"),
+    });
+  }, [desktopShell, t, i18n.language]);
+  useEffect(() => {
+    if (desktopShell && !licenseActive) safeInvoke("set_tray_title", { title: null });
+  }, [desktopShell, licenseActive]);
   const fixedGatewayUrl = !desktopShell && import.meta.env.VITE_LUTRAGATE_STANDALONE_WEB !== "true"
     ? defaultGatewayUrl() || undefined
     : undefined;
@@ -110,10 +134,15 @@ export function App() {
   // 运行时探测 Tauri：桌面 = lgm_ 走 SecretStore（Keychain）；Web = null，行为零变化（desktop 01）。
   const secretStore = useMemo(() => detectSecretStore(), []);
   const [secretDegraded, setSecretDegraded] = useState(false);
+  /** 安全存储读取失败（桌面 Keychain IPC 报错）；null = 读取正常。 */
+  const [secretReadError, setSecretReadError] = useState<string | null>(null);
   const activeEnv = activeEnvOf(envState, fixedGatewayUrl);
   const activeEnvId = activeEnv?.id ?? null;
   // 当前活跃 env id 的同步镜像：异步 token 加载的竞态守卫（multi-env 04）——
   // 加载期间环境被切换/删除时，旧环境的 lgm_ 不得复活打到新网关（spec 故事 12）。
+  // 镜像语义 =「最后一次激活请求的环境」：activateEnvToken 在发起时同步推进，
+  // 不等 React 提交——面板窗口切环境时 Keychain IPC 可能先于渲染返回，
+  // 若守卫对齐渲染状态会把合法 token 误丢（验收实录：面板卡死在凭证失效）。
   const activeEnvIdRef = useRef<string | null>(null);
   useEffect(() => {
     activeEnvIdRef.current = activeEnvId;
@@ -123,6 +152,9 @@ export function App() {
    * 异步取（安全存储不可用 → 降级明文 + degraded 警告）。启动/切换/删除回落共用。 */
   const activateEnvToken = useCallback(
     (envId: string) => {
+      // 守卫对齐「最后一次请求」：此后任何更晚发起的切换会再次推进本 ref，
+      // 更早的在途结果仍会被正确丢弃（原 multi-env 04 语义不变）。
+      activeEnvIdRef.current = envId;
       if (secretStore === null) {
         setActiveToken(loadEnvToken(window.localStorage, envId));
         return;
@@ -132,6 +164,7 @@ export function App() {
         if (activeEnvIdRef.current !== envId) return;
         setActiveToken(loaded.token);
         setSecretDegraded(loaded.degraded);
+        setSecretReadError(loaded.readError);
       });
     },
     [secretStore],
@@ -146,6 +179,37 @@ export function App() {
     activateEnvToken(env.id);
   }, [activateEnvToken, fixedGatewayUrl]);
 
+  // 跨窗口实时跟随（storage 事件只在「另一窗口」触发）：任一窗口切换环境或更新
+  // 凭证，其余窗口立即重载环境与 token——面板在隐藏时就装好新凭证，打开即出数，
+  // 不再有「显示时追赶」的窗口期（issues/08）。shown 处理保留作兜底（webview
+  // 可能被挂起而漏事件）。
+  const followExternalEnvChange = useCallback(() => {
+    const state = loadEnvState(window.localStorage);
+    setEnvState(state);
+    const env = activeEnvOf(state, fixedGatewayUrl);
+    if (env === null) return;
+    // 与主窗口 onSwitchEnv 同口径：切到不同环境先清 token——api 瞬时变 null，
+    // 不让「新地址 + 旧 token」打向目标网关（面板窗口期 401 → 凭证失效误报）。
+    if (env.id !== activeEnvIdRef.current) setActiveToken("");
+    activateEnvToken(env.id);
+  }, [fixedGatewayUrl, activateEnvToken]);
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== null && e.key !== ENV_STATE_KEY && e.key !== ENV_TOKENS_KEY) return;
+      followExternalEnvChange();
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, [followExternalEnvChange]);
+
+  // 菜单栏面板每次显示都重读活跃环境与凭证（multi-env「单活跃、切换式」）；
+  // storage 实时跟随为主，这里只兜 webview 挂起漏掉事件的情形。
+  useEffect(() => {
+    if (!menuSurface) return;
+    window.addEventListener(MENU_PANEL_SHOWN_EVENT, followExternalEnvChange);
+    return () => window.removeEventListener(MENU_PANEL_SHOWN_EVENT, followExternalEnvChange);
+  }, [menuSurface, followExternalEnvChange]);
+
   // 本地日志镜像按 env id 分库（multi-env 01/03）：桌面 = SQLite 私库
   // lutragate-<id>.db（永久保留），Web = Dexie lutragate-<id>。
   // 同步生命周期绑定活跃环境（spec 同步语义）：库带 env id 入状态，渲染时守卫
@@ -153,6 +217,11 @@ export function App() {
   // 「新网关 api + 旧环境库」的串库写入；切走环境的数据冻结在其自己的库里。
   const [dbEntry, setDbEntry] = useState<{ envId: string; store: LogStore } | null>(null);
   useEffect(() => {
+    // 菜单栏面板的 capability 不授予 SQL 插件：面板窗口绝不打开本地分析库。
+    if (menuSurface) {
+      setDbEntry(null);
+      return;
+    }
     if (activeEnvId === null) {
       setDbEntry(null);
       return;
@@ -164,7 +233,7 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [activeEnvId]);
+  }, [activeEnvId, menuSurface]);
   const db = dbEntry !== null && dbEntry.envId === activeEnvId ? dbEntry.store : null;
 
   /** lgm_ 按环境分槽持久化 + 更新活跃 token：Web = 明文 localStorage（Web 惯例）；
@@ -178,6 +247,8 @@ export function App() {
       }
       void saveEnvTokenSecure(secretStore, window.localStorage, envId, token).then((result) => {
         setSecretDegraded(result.degraded);
+        // 显式保存成功即证明安全存储可用；清掉先前的读取失败提示。
+        setSecretReadError(null);
         setActiveToken(token);
       });
     },
@@ -286,8 +357,8 @@ export function App() {
   // Memoized: a fresh instance per render would re-trigger every panel's effect.
   // 活跃环境变更（地址/token）→ 重建 AdminApi 并重取身份（spec「App 汇聚点改造」）。
   const api = useMemo(
-    () => (configured ? new AdminApi({ baseUrl: gatewayUrl, adminToken: activeToken }) : null),
-    [configured, gatewayUrl, activeToken],
+    () => (licenseActive && configured ? new AdminApi({ baseUrl: gatewayUrl, adminToken: activeToken }) : null),
+    [licenseActive, configured, gatewayUrl, activeToken],
   );
 
   useEffect(() => {
@@ -316,8 +387,26 @@ export function App() {
   }, [api, activeEnvId]);
 
 
+  // 菜单栏面板走同一 bundle（Rust 壳以 #menu-panel 加载第二个 Webview）：
+  // 授权门复核在前，未激活时不会经由面板绕过。Web 构建不进入该 surface。
+  if (menuSurface) {
+    return (
+      <MenuBarPanel
+        api={api}
+        identity={identity}
+        envName={activeEnv === null ? "" : envName(activeEnv.name)}
+        credentialInvalid={credentialInvalid}
+        environments={envState.environments}
+        activeEnvId={activeEnvId}
+        onSwitchEnv={onSwitchEnv}
+      />
+    );
+  }
+
   return (
     <div className="app-shell">
+      {/* 后台菜单栏监视（menu-bar-usage 06）：只在桌面主窗口挂载；面板窗口不重复。 */}
+      {desktopShell && <MenuBarMonitor api={api} identity={identity} />}
       {/* titlebar：品牌块（logo+名+副题，reference 形态）左置，右侧全局控件
           （主题/语言）；Web 下即页面头部，桌面原生窗口控件区由系统保留。 */}
       <header className="titlebar">
@@ -366,6 +455,7 @@ export function App() {
               onSwitch={onSwitchEnv}
               onDelete={onDeleteEnv}
               secretDegraded={secretDegraded}
+              secretReadError={secretReadError}
               api={api}
             />
           }

@@ -6,7 +6,7 @@ import { createPortal } from "react-dom";
 import type { AdminApi, LogRow, ProviderRow, AccessKeyRow, UserRow, Identity } from "../lib/api";
 import { loadAnalysisSource } from "../lib/analysis-source";
 import type { LogStore } from "../lib/logstore";
-import { isSuccessful } from "../lib/aggregate";
+import { isSuccessful, loadOverviewRangePref, saveOverviewRangePref, type OverviewRange } from "../lib/aggregate";
 import { useLogSync } from "../hooks/useLogSync";
 import { formatAxisDate, formatDateTime, formatLogTime } from "../lib/format";
 import "./instrument-overview.css";
@@ -73,7 +73,12 @@ export function InstrumentOverview({ api, db, onViewLogs, onAnalyze, identity }:
     media.addEventListener("change", update);
     return () => media.removeEventListener("change", update);
   }, []);
-  const [range, setRange] = useState("7");
+  const [range, setRange] = useState<OverviewRange>(() => loadOverviewRangePref(window.localStorage));
+  /** 切档即记忆（跨会话）；custom 还原不了不落盘。 */
+  const changeRange = (r: OverviewRange) => {
+    setRange(r);
+    saveOverviewRangePref(window.localStorage, r);
+  };
   const localInput = (time: number) => { const d = new Date(time); return new Date(time - d.getTimezoneOffset() * 60_000).toISOString().slice(0, 16); };
   const [customFrom, setCustomFrom] = useState(() => localInput(Date.now() - DAY));
   const [customTo, setCustomTo] = useState(() => localInput(Date.now()));
@@ -206,7 +211,7 @@ export function InstrumentOverview({ api, db, onViewLogs, onAnalyze, identity }:
   let offset = 0;
   function choose(s: Selection, float = false) { openerRef.current = document.activeElement as HTMLElement; setSelection(s); setPopover(float); }
   return <section className="instrument-overview">
-    <header className="io-heading"><div><h2>{personal ? t("overview.myTitle") : t("overview.title")}</h2><Help label={t("overview.helpTitle")} text={personal ? t("overview.helpPersonal") : t("overview.helpAdmin")} /></div><div className="io-actions"><select aria-label={t("overview.rangeAria")} value={range} onChange={e => { setRange(e.target.value); setRangeError(null); setSelection(null); setPopover(false); }}><option value="24h">{t("overview.range24h")}</option><option value={7}>{t("overview.rangeDays", { days: 7 })}</option><option value={14}>{t("overview.rangeDays", { days: 14 })}</option><option value={30}>{t("overview.rangeDays", { days: 30 })}</option><option value="custom">{t("overview.rangeCustom")}</option></select><Help label={sync.lastResult ? t("overview.syncHelpLabelCount", { n: sync.lastResult.inserted }) : t("overview.syncHelpLabel")} text={sync.lastResult ? `${t("overview.syncHelpInserted", { n: sync.lastResult.inserted })}${sync.lastResult.truncated ? t("overview.syncHelpTruncated") : t("overview.syncHelpDone")}` : t("overview.syncHelpIdle")} /><button disabled={sync.busy} onClick={sync.syncNow}><RefreshCw size={13} />{sync.busy ? t("overview.syncing") : t("overview.syncNow")}</button></div></header>
+    <header className="io-heading"><div><h2>{personal ? t("overview.myTitle") : t("overview.title")}</h2><Help label={t("overview.helpTitle")} text={personal ? t("overview.helpPersonal") : t("overview.helpAdmin")} /></div><div className="io-actions"><select aria-label={t("overview.rangeAria")} value={range} onChange={e => { const v = e.target.value as OverviewRange; changeRange(v); setRangeError(null); setSelection(null); setPopover(false); }}><option value="24h">{t("overview.range24h")}</option><option value={7}>{t("overview.rangeDays", { days: 7 })}</option><option value={14}>{t("overview.rangeDays", { days: 14 })}</option><option value={30}>{t("overview.rangeDays", { days: 30 })}</option><option value="custom">{t("overview.rangeCustom")}</option></select><Help label={sync.lastResult ? t("overview.syncHelpLabelCount", { n: sync.lastResult.inserted }) : t("overview.syncHelpLabel")} text={sync.lastResult ? `${t("overview.syncHelpInserted", { n: sync.lastResult.inserted })}${sync.lastResult.truncated ? t("overview.syncHelpTruncated") : t("overview.syncHelpDone")}` : t("overview.syncHelpIdle")} /><button disabled={sync.busy} onClick={sync.syncNow}><RefreshCw size={13} />{sync.busy ? t("overview.syncing") : t("overview.syncNow")}</button></div></header>
     {range === "custom" && <form className="io-custom-range" onSubmit={e => {
       e.preventDefault();
       const from = new Date(customFrom).getTime(); const to = new Date(customTo).getTime();

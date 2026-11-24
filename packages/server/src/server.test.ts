@@ -5,6 +5,7 @@ import { join } from "node:path";
 import {
   CachedConfigStore,
   createGatewayHandler,
+  dayWindowStart,
   decryptApiKey,
   encryptApiKey,
   handleAdmin,
@@ -1155,6 +1156,27 @@ describe("sqlite adapter: usage aggregation (multi-user 05)", () => {
     expect(allResp.status).toBe(200);
     const all = (await allResp.json()) as { logs: unknown[] };
     expect(all.logs).toHaveLength(3);
+  });
+
+  it("serves the gateway-defined day window and returns window_start (today=1)", async () => {
+    const f = await seedUsage();
+    const start = dayWindowStart(T0);
+    const today = (await (await handleAdmin(usageReq(f.rootToken, "?today=1&group_by=key"), deps())).json()) as {
+      window_start: number;
+      usage: Array<Record<string, unknown>>;
+    };
+    expect(today.window_start).toBe(start);
+    const explicit = (await (await handleAdmin(usageReq(f.rootToken, `?group_by=key&from=${start}`), deps())).json()) as {
+      usage: Array<Record<string, unknown>>;
+    };
+    expect(today.usage).toEqual(explicit.usage);
+  });
+
+  it("rejects today=1 combined with from/to", async () => {
+    const f = await seedUsage();
+    expect((await handleAdmin(usageReq(f.rootToken, `?today=1&from=${T0}`), deps())).status).toBe(400);
+    expect((await handleAdmin(usageReq(f.rootToken, `?today=1&to=${T0}`), deps())).status).toBe(400);
+    expect((await handleAdmin(usageReq(f.rootToken, "?today=0"), deps())).status).toBe(400);
   });
 });
 

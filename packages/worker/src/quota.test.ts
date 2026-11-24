@@ -28,6 +28,7 @@ import migration9Sql from "../migrations/0009_management_credentials.sql?raw";
 import migration10Sql from "../migrations/0010_credentials_to_key.sql?raw";
 import migration11Sql from "../migrations/0011_log_key_index.sql?raw";
 import migration12Sql from "../migrations/0012_log_error_message.sql?raw";
+import migration13Sql from "../migrations/0013_log_cached_tokens.sql?raw";
 
 // 网关准入（quota 02）：三级限额 + 并发上限在完整 handler + D1 上的行为。
 // 口径：请求数受理即计（含失败路径）；token 软墙（准入按已累计量判断，
@@ -163,7 +164,7 @@ async function logCount(): Promise<number> {
 }
 
 beforeAll(async () => {
-  const statements = [migrationSql, migration2Sql, migration3Sql, migration4Sql, migration5Sql, migration6Sql, migration7Sql, migration8Sql, migration9Sql, migration10Sql, migration11Sql, migration12Sql].join(";").split(";").map((s) => s.trim()).filter(Boolean);
+  const statements = [migrationSql, migration2Sql, migration3Sql, migration4Sql, migration5Sql, migration6Sql, migration7Sql, migration8Sql, migration9Sql, migration10Sql, migration11Sql, migration12Sql, migration13Sql].join(";").split(";").map((s) => s.trim()).filter(Boolean);
   await db().batch(statements.map((s) => db().prepare(s)));
 });
 

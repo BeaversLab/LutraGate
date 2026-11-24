@@ -6,8 +6,10 @@ import {
   aggregateLogs,
   effectiveWindow,
   filterLogs,
+  loadTimeRangePref,
   NO_PROVIDER_KEY,
   NO_USER_KEY,
+  saveTimeRangePref,
   type TimeRange,
 } from "../lib/aggregate";
 import type { LogStore } from "../lib/logstore";
@@ -30,7 +32,12 @@ export function DashboardPanel({ api, db, onViewLogs }: { api: AdminApi; db: Log
   const [users, setUsers] = useState<UserRow[]>([]);
   const [accessKeys, setAccessKeys] = useState<AccessKeyRow[]>([]);
   const [keys, setKeys] = useState<KeyRow[]>([]);
-  const [range, setRange] = useState<TimeRange>("7d");
+  const [range, setRange] = useState<TimeRange>(() => loadTimeRangePref(window.localStorage));
+  /** 切档即记忆（跨会话）；custom 还原不了不落盘。 */
+  const changeRange = (r: TimeRange) => {
+    setRange(r);
+    saveTimeRangePref(window.localStorage, r);
+  };
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
   const [model, setModel] = useState<string>("");
@@ -153,7 +160,7 @@ export function DashboardPanel({ api, db, onViewLogs }: { api: AdminApi; db: Log
           range={range}
           customFrom={customFrom}
           customTo={customTo}
-          onRangeChange={setRange}
+          onRangeChange={changeRange}
           onCustomChange={(f, t) => {
             setCustomFrom(f);
             setCustomTo(t);

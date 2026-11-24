@@ -19,6 +19,7 @@ export const LOG_COLUMNS = [
   "provider_id",
   "key_id",
   "prompt_tokens",
+  "cached_tokens",
   "completion_tokens",
   "latency_ms",
   "status",
@@ -52,6 +53,7 @@ export function schemaSql(): string[] {
   provider_id TEXT,
   key_id TEXT,
   prompt_tokens INTEGER,
+  cached_tokens INTEGER,
   completion_tokens INTEGER,
   latency_ms INTEGER,
   status INTEGER NOT NULL,
@@ -129,10 +131,16 @@ export class SqliteLogStore implements LogStore {
   /** 打开即建表（幂等 DDL）；桌面入口见 loadDesktopLogStore。 */
   static async open(executor: SqlExecutor): Promise<SqliteLogStore> {
     for (const ddl of schemaSql()) await executor.execute(ddl);
-    // 存量环境库补列（error_message，打磨轮 B；新库由上面的 DDL 直接创建）。
-    // ALTER 对已含该列的库抛错——catch 即「列已存在」，与 server migrate() 同范式。
+    // 存量环境库补列（error_message，打磨轮 B；cached_tokens，usage-cached）。
+    // 新库由上面的 DDL 直接创建。ALTER 对已含该列的库抛错——catch 即「列已存在」，
+    // 与 server migrate() 同范式。
     try {
       await executor.execute("ALTER TABLE logs ADD COLUMN error_message TEXT");
+    } catch {
+      // 列已存在
+    }
+    try {
+      await executor.execute("ALTER TABLE logs ADD COLUMN cached_tokens INTEGER");
     } catch {
       // 列已存在
     }

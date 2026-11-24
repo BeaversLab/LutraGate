@@ -18,10 +18,13 @@ if (typeof window.matchMedia !== "function") {
 }
 
 // 组件测试固定 zh（UI 2.0 #10 spec）：断言中文产出（同时验证 key 存在与文案正确）。
-// 全局偏好键（lutragate.theme / lutragate.locale）不随环境分槽，用例间清空防串扰。
+// 全局偏好键（lutragate.theme / lutragate.locale / 时间范围记忆）不随环境分槽，
+// 用例间清空防串扰。
 beforeEach(() => {
   window.localStorage.removeItem("lutragate.theme");
   window.localStorage.removeItem("lutragate.locale");
+  window.localStorage.removeItem("lutragate.time-range");
+  window.localStorage.removeItem("lutragate.overview-range");
   document.documentElement.dataset.theme = "";
   void i18n.changeLanguage("zh");
 });

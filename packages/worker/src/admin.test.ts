@@ -1,9 +1,10 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { env } from "cloudflare:test";
-import { handleAdmin, SqlConfigStore } from "@lutragate/core";
+import { dayWindowStart, handleAdmin, SqlConfigStore } from "@lutragate/core";
 import { D1AdminDb } from "./d1";
 import type { Fetcher } from "@lutragate/core";
 import { createHandler } from "./index";
+import type { Env } from "./env";
 import { decryptApiKey, importEncryptionKey } from "@lutragate/core";
 import migrationSql from "../migrations/0001_init.sql?raw";
 import migration2Sql from "../migrations/0002_provider_type.sql?raw";
@@ -17,6 +18,7 @@ import migration9Sql from "../migrations/0009_management_credentials.sql?raw";
 import migration10Sql from "../migrations/0010_credentials_to_key.sql?raw";
 import migration11Sql from "../migrations/0011_log_key_index.sql?raw";
 import migration12Sql from "../migrations/0012_log_error_message.sql?raw";
+import migration13Sql from "../migrations/0013_log_cached_tokens.sql?raw";
 
 // 32-byte zero key in base64 (test only).
 const TEST_ENCRYPTION_KEY = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
@@ -88,7 +90,7 @@ async function callAs(token: string, method: string, path: string, body?: unknow
 }
 
 beforeAll(async () => {
-  const statements = [migrationSql, migration2Sql, migration3Sql, migration4Sql, migration5Sql, migration6Sql, migration7Sql, migration8Sql, migration9Sql, migration10Sql, migration11Sql, migration12Sql].join(";").split(";").map((s) => s.trim()).filter(Boolean);
+  const statements = [migrationSql, migration2Sql, migration3Sql, migration4Sql, migration5Sql, migration6Sql, migration7Sql, migration8Sql, migration9Sql, migration10Sql, migration11Sql, migration12Sql, migration13Sql].join(";").split(";").map((s) => s.trim()).filter(Boolean);
   await db().batch(statements.map((s) => db().prepare(s)));
 });
 
@@ -1808,8 +1810,16 @@ async function usageFixture() {
   return { rootToken, alice, bob, aliceKey1, aliceKey2, bobKey };
 }
 
-async function getUsage(query: string, token?: string): Promise<Response> {
-  return callAs(token ?? "admin-secret", "GET", `/admin/usage${query}`);
+interface UsageBody {
+  window_start?: number;
+  usage: Array<Record<string, unknown>>;
+}
+
+async function getUsage(query: string, token?: string, now = T0): Promise<Response> {
+  return handleAdmin(
+    new Request(`http://gw/admin/usage${query}`, { headers: { "x-admin-token": token ?? "admin-secret" } }),
+    { ...adminDeps(ADMIN_ENV, true), now: () => now },
+  );
 }
 
 describe("usage aggregation (multi-user 05)", () => {
@@ -1896,6 +1906,90 @@ describe("usage aggregation (multi-user 05)", () => {
     expect((await getUsage("?group_by=nope", f.rootToken)).status).toBe(400);
     expect((await getUsage("?from=whenever", f.rootToken)).status).toBe(400);
     expect((await getUsage(`?to=soon`, f.rootToken)).status).toBe(400);
+  });
+
+  it("serves the gateway-defined day window and returns window_start (today=1)", async () => {
+    const f = await usageFixture();
+    const start = dayWindowStart(T0);
+    const resp = await getUsage("?group_by=key&today=1", f.rootToken);
+    expect(resp.status).toBe(200);
+    const today = (await resp.json()) as UsageBody;
+    expect(today.window_start).toBe(start);
+    // 等价：显式传入服务端窗口起点作为 from。
+    const explicit = (await (await getUsage(`?group_by=key&from=${start}`, f.rootToken)).json()) as UsageBody;
+    expect(today.usage).toEqual(explicit.usage);
+    // 组合维度：按模型分组、administrator 按 user_id 收窄，均与显式窗口等价。
+    const todayModel = (await (await getUsage("?group_by=model&today=1", f.rootToken)).json()) as UsageBody;
+    const explicitModel = (await (await getUsage(`?group_by=model&from=${start}`, f.rootToken)).json()) as UsageBody;
+    expect(todayModel.usage).toEqual(explicitModel.usage);
+    const bobScope = `user_id=${f.bob!.id}`;
+    const todayBob = (await (await getUsage(`?today=1&${bobScope}`, f.rootToken)).json()) as UsageBody;
+    const explicitBob = (await (await getUsage(`?from=${start}&${bobScope}`, f.rootToken)).json()) as UsageBody;
+    expect(todayBob).toMatchObject({ window_start: start, usage: explicitBob.usage });
+  });
+
+  it("rejects today=1 combined with from/to and unknown today values", async () => {
+    const f = await usageFixture();
+    expect((await getUsage(`?today=1&from=${T0}`, f.rootToken)).status).toBe(400);
+    expect((await getUsage(`?today=1&to=${T0}`, f.rootToken)).status).toBe(400);
+    expect((await getUsage("?today=0", f.rootToken)).status).toBe(400);
+    expect((await getUsage("?today=yes", f.rootToken)).status).toBe(400);
+  });
+
+  it("keeps the legacy response shape when today is absent", async () => {
+    const f = await usageFixture();
+    const legacy = (await (await getUsage("?group_by=key", f.rootToken)).json()) as Record<string, unknown>;
+    expect(legacy).not.toHaveProperty("window_start");
+  });
+
+  it("flips the today window at local midnight (23:59 vs 00:01)", async () => {
+    const f = await usageFixture();
+    const start = dayWindowStart(T0);
+    const beforeKey = "V1StGXR8_Z5jdHi6B-bd1";
+    const afterKey = "V1StGXR8_Z5jdHi6B-bd2";
+    const plusKey = "V1StGXR8_Z5jdHi6B-bd3";
+    await seedUsage([
+      { ts: start - 1, model: "boundary", keyId: beforeKey, userId: f.alice!.id, prompt: 1, completion: 0, latency: 1, status: 200 },
+      { ts: start, model: "boundary", keyId: afterKey, userId: f.alice!.id, prompt: 2, completion: 0, latency: 1, status: 200 },
+      { ts: start + 60_000, model: "boundary", keyId: plusKey, userId: f.alice!.id, prompt: 3, completion: 0, latency: 1, status: 200 },
+    ]);
+    const at = (now: number, key: string) =>
+      getUsage(`?today=1&group_by=key&access_key_id=${key}`, f.rootToken, now);
+    // 前一毫秒仍属前一日窗口：只含 start-1 行，窗口起点为前一日午夜。
+    const late = (await (await at(start - 1, beforeKey)).json()) as UsageBody & { usage: Array<{ requests: number }> };
+    expect(late.window_start).toBe(dayWindowStart(start - 1));
+    expect(late.usage[0]?.requests).toBe(1);
+    // 00:00 翻窗：同一过滤条件不再含前一日行；本日开始行可见。
+    const early = (await (await at(start, beforeKey)).json()) as UsageBody;
+    expect(early.window_start).toBe(start);
+    expect(early.usage).toEqual([]);
+    // 00:01 仍在同一窗口：窗口起点不变，当日行可见。
+    const minuteLater = (await (await at(start + 60_000, plusKey)).json()) as UsageBody & { usage: Array<{ requests: number }> };
+    expect(minuteLater.window_start).toBe(start);
+    expect(minuteLater.usage[0]?.requests).toBe(1);
+  });
+
+  it("scopes the user role inside the today window", async () => {
+    const f = await usageFixture();
+    const body = (await (await getUsage("?group_by=key&today=1", f.alice!.management_token!)).json()) as UsageBody;
+    expect(body.window_start).toBe(dayWindowStart(T0));
+    expect(body.usage.map((r) => r.access_key_id).sort()).toEqual([f.aliceKey1, f.aliceKey2].sort());
+  });
+
+  it("returns a zero-value structure and window_start for an empty today window", async () => {
+    const f = await usageFixture();
+    const future = dayWindowStart(T0) + 30 * 86_400_000;
+    const body = (await (await getUsage("?today=1", f.rootToken, future)).json()) as UsageBody;
+    expect(body.window_start).toBe(dayWindowStart(future));
+    expect(body.usage).toEqual([{ requests: 0, errors: 0, prompt_tokens: 0, completion_tokens: 0, avg_latency_ms: 0 }]);
+  });
+
+  it("threads the injected clock from createHandler into the admin usage route", async () => {
+    const handler = createHandler({ clock: { now: () => T0 } });
+    const resp = await handler(adminReq("GET", "/admin/usage?today=1"), ADMIN_ENV as unknown as Env);
+    expect(resp.status).toBe(200);
+    const body = (await resp.json()) as UsageBody;
+    expect(body.window_start).toBe(dayWindowStart(T0));
   });
 });
 

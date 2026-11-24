@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { AccessKeyRow, AdminApi, Identity, LogRow, ProviderRow, UserRow } from "../lib/api";
-import { effectiveWindow, filterLogs, type TimeRange } from "../lib/aggregate";
+import { effectiveWindow, filterLogs, loadTimeRangePref, saveTimeRangePref, type TimeRange } from "../lib/aggregate";
 import type { LogStore } from "../lib/logstore";
 import { exportCsv } from "../lib/csv";
 import { useLogSync } from "../hooks/useLogSync";
@@ -61,9 +61,14 @@ export function RawLogPanel({
   const [providers, setProviders] = useState<ProviderRow[]>([]);
   const [users, setUsers] = useState<UserRow[]>([]);
   const [accessKeys, setAccessKeys] = useState<AccessKeyRow[]>([]);
-  const [range, setRange] = useState<TimeRange>("7d");
+  const [range, setRange] = useState<TimeRange>(() => loadTimeRangePref(window.localStorage));
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
+  /** 切档即记忆（跨会话）；custom 还原不了不落盘。 */
+  const changeRange = (r: TimeRange) => {
+    setRange(r);
+    saveTimeRangePref(window.localStorage, r);
+  };
   const [model, setModel] = useState("");
   const [provider, setProvider] = useState("");
   const [user, setUser] = useState("");
@@ -138,7 +143,7 @@ export function RawLogPanel({
   const currentPage = Math.min(page, pageCount);
   const pageRows = visible.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
   // 表列数（我的入口无「用户」列）——表头/空态/展开行的 colSpan 单一来源。
-  const colCount = selfOnly ? 10 : 11;
+  const colCount = selfOnly ? 11 : 12;
 
   const providerName = (id: string | null) => (id === null ? "—" : providers.find((p) => p.id === id)?.name ?? id);
   const keyLabel = (id: string | null) => {
@@ -189,7 +194,7 @@ export function RawLogPanel({
           range={range}
           customFrom={customFrom}
           customTo={customTo}
-          onRangeChange={setRange}
+          onRangeChange={changeRange}
           onCustomChange={(f, t2) => {
             setCustomFrom(f);
             setCustomTo(t2);
@@ -244,7 +249,7 @@ export function RawLogPanel({
             <tr>
               <th>{t("logs.colTime")}</th><th>{t("logs.colRequest")}</th><th>{t("logs.colStatus")}</th><th>{t("logs.colModel")}</th><th>{t("logs.colProvider")}</th>
               {!selfOnly && <th>{t("logs.colUser")}</th>}
-              <th>{t("logs.colKey")}</th><th>{t("logs.colPrompt")}</th><th>{t("logs.colCompletion")}</th><th>{t("logs.colLatency")}</th><th>{t("logs.colError")}</th>
+              <th>{t("logs.colKey")}</th><th>{t("logs.colPrompt")}</th><th>{t("logs.colCached")}</th><th>{t("logs.colCompletion")}</th><th>{t("logs.colLatency")}</th><th>{t("logs.colError")}</th>
             </tr>
           </thead>
           <tbody>
@@ -290,6 +295,7 @@ export function RawLogPanel({
                     {!selfOnly && <td>{userName(row.user_id)}</td>}
                     <td>{keyLabel(row.access_key_id)}</td>
                     <td>{row.prompt_tokens ?? "—"}</td>
+                    <td>{row.cached_tokens ?? "—"}</td>
                     <td>{row.completion_tokens ?? "—"}</td>
                     <td>{row.latency_ms === null ? "—" : `${row.latency_ms} ms`}</td>
                     <td>{row.error_type ?? "—"}</td>

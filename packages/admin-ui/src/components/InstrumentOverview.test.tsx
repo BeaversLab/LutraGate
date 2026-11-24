@@ -29,7 +29,8 @@ describe("instrument overview", () => {
     const read = vi.fn(async () => logs);
     render(<InstrumentOverview api={api} db={{ listLogs: read } as unknown as LogStore} />);
     await screen.findByRole("button", { name: "Alpha 90.0%" });
-    fireEvent.change(screen.getByLabelText("统计时间范围"), { target: { value: "24h" } });
+    // 默认已是 24h 档 → 切 7 天档验证窗口变化触发重查。
+    fireEvent.change(screen.getByLabelText("统计时间范围"), { target: { value: "7" } });
     await waitFor(() => expect(read.mock.calls.length).toBeGreaterThan(1));
     fireEvent.change(screen.getByLabelText("统计时间范围"), { target: { value: "custom" } });
     fireEvent.change(screen.getByLabelText("开始时间"), { target: { value: "2026-01-02T00:00" } });

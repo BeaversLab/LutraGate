@@ -21,6 +21,11 @@ const usageCache = new Map<string, KeyUsageBody>();
 export type Translator = (key: string, opts?: Record<string, unknown>) => string;
 const globalT: Translator = (key, opts) => i18n.t(key, opts ?? {}) as string;
 
+/** 该供应商类型是否挂了用量 adapter（面板据此整行渲染/隐藏）。 */
+export function isUsageSupported(providerType: string): boolean {
+  return (PROVIDER_USAGE_TYPES as readonly string[]).includes(providerType);
+}
+
 /** 70% 黄 / 90% 红的填充色 class；其余走默认主色。 */
 export function usageFillClass(percentage: number): string {
   if (percentage >= 90) return "usage-fill danger";
@@ -72,7 +77,7 @@ export function KeyUsageCell({
   const { t } = useTranslation();
   // TFunction 泛型签名与纯函数注入点（Translator）之间做一层收窄包装。
   const translate: Translator = (key, opts) => t(key, opts ?? {});
-  const supported = (PROVIDER_USAGE_TYPES as readonly string[]).includes(providerType);
+  const supported = isUsageSupported(providerType);
   const [data, setData] = useState<KeyUsageBody | null>(() => usageCache.get(keyRow.id) ?? null);
   const [error, setError] = useState<string | null>(null);
   const [unsupported, setUnsupported] = useState(false);

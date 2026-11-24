@@ -61,4 +61,12 @@ describe("AdminApi", () => {
     expect(fetcher.calls[0]!.init?.method).toBe("POST");
     expect(JSON.parse(fetcher.calls[0]!.init!.body as string)).toEqual({ provider_id: "p1", api_key: "sk-1" });
   });
+
+  it("serializes the gateway-defined today window and returns window_start", async () => {
+    const windowStart = 1_731_024_000_000;
+    const fetcher = fetchSpy(() => jsonResp(200, { group_by: "key", usage: [], window_start: windowStart }));
+    const result = await new AdminApi({ ...opts, fetcher }).getUsage({ group_by: "key", today: true });
+    expect(fetcher.calls[0]!.url).toBe("http://gw.test/admin/usage?group_by=key&today=1");
+    expect(result.window_start).toBe(windowStart);
+  });
 });

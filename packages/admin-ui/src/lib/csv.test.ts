@@ -31,14 +31,14 @@ describe("logsToCsv", () => {
       log({ id: "a", ts: 1_700_000_000_000, client_model: "gpt-4", upstream_model: null }),
     ]);
     const lines = csv.trimEnd().split("\n");
-    expect(lines[0]).toBe("id,request_id,ts,client_model,upstream_model,provider_id,key_id,prompt_tokens,completion_tokens,latency_ms,status,error_type,error_message,user_id,access_key_id");
-    expect(lines[1]).toBe("a,r,2023-11-14T22:13:20.000Z,gpt-4,,p1,,10,5,50,200,,,,");
+    expect(lines[0]).toBe("id,request_id,ts,client_model,upstream_model,provider_id,key_id,prompt_tokens,cached_tokens,completion_tokens,latency_ms,status,error_type,error_message,user_id,access_key_id");
+    expect(lines[1]).toBe("a,r,2023-11-14T22:13:20.000Z,gpt-4,,p1,,10,,5,50,200,,,,");
   });
 
   it("转义：逗号/引号/换行的字段加引号，内部引号翻倍", () => {
     const csv = logsToCsv([log({ id: "x", client_model: 'mo"del, v2\nnext' })]);
     // 字段被引号包裹（含换行），内部引号翻倍——只断言表头成行 + 字段形态。
-    expect(csv.split("\n")[0]).toBe("id,request_id,ts,client_model,upstream_model,provider_id,key_id,prompt_tokens,completion_tokens,latency_ms,status,error_type,error_message,user_id,access_key_id");
+    expect(csv.split("\n")[0]).toBe("id,request_id,ts,client_model,upstream_model,provider_id,key_id,prompt_tokens,cached_tokens,completion_tokens,latency_ms,status,error_type,error_message,user_id,access_key_id");
     expect(csv).toContain('"mo""del, v2\nnext"');
   });
 });

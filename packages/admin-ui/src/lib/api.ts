@@ -166,6 +166,8 @@ export interface UsageRow {
 export interface UsageResult {
   group_by: "key" | "model" | null;
   usage: UsageRow[];
+  /** today=1 时服务端返回的窗口起点（epoch ms，网关本地午夜）；其他查询缺省。 */
+  window_start?: number;
 }
 
 export class ApiError extends Error {
@@ -189,6 +191,8 @@ export interface LogRow {
   provider_id: string | null;
   key_id: string | null;
   prompt_tokens: number | null;
+  /** 缓存命中 token（cache read），已含在 prompt_tokens 内；旧行/无缓存为空。 */
+  cached_tokens?: number | null;
   completion_tokens: number | null;
   latency_ms: number | null;
   status: number;
@@ -406,10 +410,13 @@ export class AdminApi {
   getMyGrants(): Promise<MyGrantsResult> {
     return this.request("/admin/me/grants");
   }
-  /** 用量聚合（multi-user 05）；user 角色服务端强制只回自己的数据；user_id 过滤仅 administrator 可用。 */
-  getUsage(params: { group_by?: "key" | "model"; from?: number; to?: number; access_key_id?: string; user_id?: string } = {}): Promise<UsageResult> {
+  /** 用量聚合（multi-user 05）；user 角色服务端强制只回自己的数据；user_id 过滤仅 administrator 可用。
+   * `today: true` 请求服务端按网关本地时区算出的当日窗口（ADR-0005），客户端不再自行计算午夜；
+   * 与 `from`/`to` 互斥（同传服务端返回 400）。 */
+  getUsage(params: { group_by?: "key" | "model"; today?: boolean; from?: number; to?: number; access_key_id?: string; user_id?: string } = {}): Promise<UsageResult> {
     const search = new URLSearchParams();
     if (params.group_by !== undefined) search.set("group_by", params.group_by);
+    if (params.today === true) search.set("today", "1");
     if (params.from !== undefined) search.set("from", String(params.from));
     if (params.to !== undefined) search.set("to", String(params.to));
     if (params.access_key_id !== undefined) search.set("access_key_id", params.access_key_id);

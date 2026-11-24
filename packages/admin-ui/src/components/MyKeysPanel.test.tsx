@@ -24,11 +24,12 @@ const todayUsage = {
 };
 
 /** 列表 GET（keys + 今日 usage）；写操作交 write handler 断言。 */
-function makeApi(write?: (url: string, init: RequestInit) => Response) {
+function makeApi(write?: (url: string, init: RequestInit) => Response, onUrl?: (url: string) => void) {
   return new AdminApi({
     baseUrl: "http://gw.test",
     adminToken: "t",
     fetcher: async (url, init) => {
+      onUrl?.(url);
       if (init?.method && init.method !== "GET" && write) return write(url, init);
       if (url.endsWith("/admin/access-keys")) return jsonResponse(myKeys);
       if (url.includes("/admin/usage")) return jsonResponse(todayUsage);
@@ -61,6 +62,18 @@ describe("MyKeysPanel (multi-user 07; 打磨轮对齐 Key 管理)", () => {
     expect(screen.getByText("Tokens 0 / 不限")).toBeTruthy();
     // 状态徽标：ak1 启用 / ak2 已停用。
     expect(screen.getByText("已停用")).toBeTruthy();
+  });
+
+  it("queries the day window with today=1 instead of a client-computed from", async () => {
+    const urls: string[] = [];
+    render(<MyKeysPanel api={makeApi(undefined, (u) => urls.push(u))} />);
+    await screen.findByText("场景1-客服机器人");
+    const usageUrls = urls.filter((u) => u.includes("/admin/usage"));
+    expect(usageUrls.length).toBeGreaterThan(0);
+    for (const u of usageUrls) {
+      expect(new URL(u).searchParams.get("today")).toBe("1");
+      expect(new URL(u).searchParams.has("from")).toBe(false);
+    }
   });
 
   it("filters by name/hint search with two empty states", async () => {

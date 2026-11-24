@@ -123,6 +123,9 @@ export function createHandler(deps: HandlerDeps = {}) {
         },
         encryptionKey: env.ENCRYPTION_KEY,
         invalidate: () => store?.invalidate(),
+        // 与配额账本共用同一注入时钟（ADR-0005）：today=1 的窗口起点必须与
+        // 429 判定同源，测试注入 clock 时两者不会分裂。
+        now: () => (deps.clock ? deps.clock.now() : Date.now()),
       });
     }
 

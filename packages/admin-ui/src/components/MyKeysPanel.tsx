@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ChevronRight } from "lucide-react";
 import type { AccessKeyRow, AdminApi, Identity, UsageRow } from "../lib/api";
-import { formatLimit, indexUsageByKey, localMidnight, parseLimitInput, remaining, usageTokens } from "../lib/quota";
+import { formatLimit, indexUsageByKey, parseLimitInput, remaining, usageTokens } from "../lib/quota";
 import { credentialStatus, dateInputToExpiry, expiryToDateInput, formatDate, formatExpiry, parseCidrList } from "../lib/access-control";
 import { toErrorMessage } from "../lib/error";
 import { useConfirm } from "./ConfirmModal";
@@ -42,12 +42,12 @@ export function MyKeysPanel({ api, identity }: { api: AdminApi; identity?: Ident
 
   const refresh = useCallback(async () => {
     try {
-      // 当日（本地午夜起）按 key 聚合——次数列与余量的「已用」来源。
+      // 当日（today=1，服务端定义窗口起点）按 key 聚合——次数列与余量的「已用」来源。
       const [keyRows, usage] = await Promise.all([
         api.listAccessKeys(),
         api.getUsage({
           group_by: "key",
-          from: localMidnight(),
+          today: true,
           ...(selfUserId ? { user_id: selfUserId } : {}),
         }),
       ]);

@@ -247,6 +247,44 @@ export function rangeStart(range: TimeRange, now: number): number | undefined {
   }
 }
 
+// ---- 时间范围偏好（跨会话记忆）------------------------------------------------
+
+export const TIME_RANGE_STORAGE_KEY = "lutragate.time-range";
+
+/** 可持久化的快捷档：custom 的 from/to 不落盘，记忆了也无法还原，不存。 */
+const PERSISTABLE_RANGES: readonly TimeRange[] = ["24h", "7d", "30d", "all"];
+
+/** 读取上次的范围选择；缺失/非法 → 默认 24h。 */
+export function loadTimeRangePref(storage: Pick<Storage, "getItem">): TimeRange {
+  const raw = storage.getItem(TIME_RANGE_STORAGE_KEY);
+  return PERSISTABLE_RANGES.includes(raw as TimeRange) ? (raw as TimeRange) : "24h";
+}
+
+/** 持久化范围选择（custom 跳过——还原不了就不覆盖上次有效选择）。 */
+export function saveTimeRangePref(storage: Pick<Storage, "setItem">, range: TimeRange): void {
+  if (PERSISTABLE_RANGES.includes(range)) storage.setItem(TIME_RANGE_STORAGE_KEY, range);
+}
+
+/** 概览页（InstrumentOverview）的范围档：天数用字符串（select value 直传）。 */
+export type OverviewRange = "24h" | "7" | "14" | "30" | "custom";
+
+export const OVERVIEW_RANGE_STORAGE_KEY = "lutragate.overview-range";
+
+const PERSISTABLE_OVERVIEW_RANGES: readonly OverviewRange[] = ["24h", "7", "14", "30"];
+
+/** 读取概览页上次的范围选择；缺失/非法 → 默认 24h。 */
+export function loadOverviewRangePref(storage: Pick<Storage, "getItem">): OverviewRange {
+  const raw = storage.getItem(OVERVIEW_RANGE_STORAGE_KEY);
+  return PERSISTABLE_OVERVIEW_RANGES.includes(raw as OverviewRange)
+    ? (raw as OverviewRange)
+    : "24h";
+}
+
+/** 持久化概览页范围选择（custom 跳过）。 */
+export function saveOverviewRangePref(storage: Pick<Storage, "setItem">, range: OverviewRange): void {
+  if (PERSISTABLE_OVERVIEW_RANGES.includes(range)) storage.setItem(OVERVIEW_RANGE_STORAGE_KEY, range);
+}
+
 const DAY_MS = 86_400_000;
 
 /** 自定义窗的桶粒度（desktop 04 spec）：约 <2 天=小时、<60 天=天、否则=周。 */
